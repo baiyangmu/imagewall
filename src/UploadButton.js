@@ -1,4 +1,3 @@
-// UploadButton.js
 import React, { useState } from 'react';
 import axios from 'axios';
 import './UploadButton.css';
@@ -13,13 +12,14 @@ const UploadButton = ({ onUploadSuccess }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const handleFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files.length) return;
 
     setError(null);
 
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      setError('不支持的文件类型，请上传 JPG、PNG、GIF 或 WEBP 格式的图片。');
+    const invalidFiles = Array.from(files).filter(file => !ALLOWED_MIME_TYPES.includes(file.type));
+    if (invalidFiles.length > 0) {
+      setError('部分文件类型不支持，请仅上传 JPG、PNG、GIF 或 WEBP 格式的图片。');
       event.target.value = null;
       return;
     }
@@ -28,7 +28,7 @@ const UploadButton = ({ onUploadSuccess }) => {
     setUploadProgress(0);
 
     const formData = new FormData();
-    formData.append('file', file);
+    Array.from(files).forEach(file => formData.append('files', file)); // 批量上传文件
 
     try {
       const response = await axios.post(`${API_URL}/api/upload`, formData, {
@@ -42,7 +42,6 @@ const UploadButton = ({ onUploadSuccess }) => {
       });
 
       if (response.status === 200) {
-        alert('图片上传成功！');
         if (onUploadSuccess) {
           onUploadSuccess();
         }
@@ -50,7 +49,7 @@ const UploadButton = ({ onUploadSuccess }) => {
         setError(response.data.error || '上传失败');
       }
     } catch (err) {
-      console.error('Error uploading image:', err);
+      console.error('Error uploading images:', err);
       setError('上传过程中发生错误');
     } finally {
       setUploading(false);
@@ -66,6 +65,7 @@ const UploadButton = ({ onUploadSuccess }) => {
         id="file-input"
         onChange={handleFileChange}
         style={{ display: 'none' }}
+        multiple // 支持多文件选择
       />
 
       <label htmlFor="file-input" className={`upload-button small-btn ${uploading ? 'disabled' : ''}`}>

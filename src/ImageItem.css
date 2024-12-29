@@ -1,29 +1,80 @@
-/* ImageGrid.css */
+/* ImageItem.css */
 
-/* 模态框覆盖层 */
-.overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(255, 255, 255, 0.2); /* 半透明白色背景 */
-  backdrop-filter: blur(10px); /* 毛玻璃效果 */
-  -webkit-backdrop-filter: blur(10px); /* 毛玻璃效果 - Safari */
+.image-item {
+  position: relative; /* 以便删除按钮定位 */
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer; /* 鼠标悬停时显示为指针 */
+  transition: transform 0.3s;
+}
+
+.image-item img {
+  width: 100%;
+  display: block;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.placeholder {
+  width: 100%;
+  height: 200px; /* 根据需要调整 */
+  background-color: #f0f0f0;
+}
+
+/* 抖动动画 */
+@keyframes shake {
+  0% { transform: translate(1px, 1px) rotate(0deg); }
+  10% { transform: translate(-1px, -2px) rotate(-1deg); }
+  20% { transform: translate(-3px, 0px) rotate(1deg); }
+  30% { transform: translate(3px, 2px) rotate(0deg); }
+  40% { transform: translate(1px, -1px) rotate(1deg); }
+  50% { transform: translate(-1px, 2px) rotate(-1deg); }
+  60% { transform: translate(-3px, 1px) rotate(0deg); }
+  70% { transform: translate(3px, 1px) rotate(-1deg); }
+  80% { transform: translate(-1px, -1px) rotate(1deg); }
+  90% { transform: translate(1px, 2px) rotate(0deg); }
+  100% { transform: translate(1px, -2px) rotate(-1deg); }
+}
+
+.shaking {
+  animation: shake 0.5s;
+  animation-iteration-count: infinite;
+}
+
+/* 删除按钮 */
+.delete-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  background-color: rgba(255, 0, 0, 0.8); /* 半透明红色 */
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: center;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  transition: opacity 300ms ease-in-out;
-  z-index: 1000; /* 确保覆盖层高于上传按钮 */
+  z-index: 1; /* 确保按钮在图片上方 */
+  transition: background-color 0.3s, transform 0.3s;
 }
 
-.overlay.ReactModal__Overlay--after-open {
-  opacity: 1;
+.delete-button:hover {
+  background-color: rgba(255, 0, 0, 1); /* 完全红色 */
+  transform: scale(1.1); /* 点击时略微放大 */
 }
 
-.overlay.ReactModal__Overlay--before-close {
-  opacity: 0;
+/* 响应式调整 */
+@media (max-width: 600px) {
+  .delete-button {
+    width: 20px;
+    height: 20px;
+    font-size: 14px;
+    line-height: 20px;
+  }
 }
-
-/* 其他模态框样式保持不变 */

@@ -1,0 +1,72 @@
+/* ConfirmModal.css */
+
+.confirm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5); /* 保持半透明的黑色背景 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  
+  .confirm-modal {
+    background: rgba(255, 255, 255, 0.2); /* 半透明白色背景 */
+    padding: 25px; /* 增加内边距 */
+    border-radius: 10px; /* 增大圆角 */
+    width: 350px; /* 增大宽度 */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2); /* 加强阴影效果 */
+    
+    /* 毛玻璃效果 */
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px); /* 适用于 Safari */
+    
+    /* 可选：添加边框以增强视觉效果 */
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  
+  .confirm-content p {
+    margin-bottom: 20px;
+    font-size: 16px;
+    text-align: center;
+    color: #fff; /* 调整文字颜色以提高对比度 */
+  }
+  
+  .confirm-buttons {
+    display: flex;
+    justify-content: space-around;
+  }
+  
+  .confirm-button,
+  .cancel-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  
+  .confirm-button {
+    background-color: rgba(255, 0, 0, 0.8);
+    color: white;
+    padding: 10px 20px; /* 增大按钮内边距 */
+  }
+  
+  .confirm-button:hover {
+    background-color: rgba(255, 0, 0, 1);
+  }
+  
+  .cancel-button {
+    background-color: rgba(255, 255, 255, 0.3); /* 半透明白色 */
+    color: #fff;
+    padding: 10px 20px; /* 增大按钮内边距 */
+  }
+  
+  .cancel-button:hover {
+    background-color: rgba(255, 255, 255, 0.5);
+  }
+  

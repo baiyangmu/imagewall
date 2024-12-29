@@ -1,30 +1,22 @@
 // ImageGrid.js
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  forwardRef,
-  useImperativeHandle,
-} from 'react';
+import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import Masonry from 'react-masonry-css';
 import ImageItem from './ImageItem';
 import Modal from 'react-modal';
 import './ImageGrid.css';
 
-// 设置模态框的根元素
 Modal.setAppElement('#root');
 
 const API_URL = process.env.REACT_APP_API_URL;
 
-const ImageGrid = forwardRef((props, ref) => {
+const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   
   // 模态框状态
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [selectedImage, setSelectedImage] = useState({ id: null, src: null });
   const [imageOrientation, setImageOrientation] = useState('landscape'); // 'portrait' 或 'landscape'
 
   const observer = useRef();
@@ -100,12 +92,12 @@ const ImageGrid = forwardRef((props, ref) => {
     1200: 4,
     900: 3,
     600: 2,
-    300:1
+    300: 1
   };
 
   // 打开模态框
-  const openModal = (imageSrc) => {
-    setSelectedImage(imageSrc);
+  const openModal = (id, imageSrc) => {
+    setSelectedImage({ id, src: imageSrc });
 
     // 创建一个新的 Image 对象来获取自然尺寸
     const img = new Image();
@@ -125,8 +117,18 @@ const ImageGrid = forwardRef((props, ref) => {
 
   // 关闭模态框
   const closeModal = () => {
-    setSelectedImage(null);
+    setSelectedImage({ id: null, src: null });
     setImageOrientation('landscape'); // 重置为默认
+  };
+
+  // 处理图片删除
+  const handleDelete = (id) => {
+    setImages((prevImages) => prevImages.filter((image) => image.id !== id));
+
+    // 如果删除的是当前选中的图片，关闭模态框
+    if (selectedImage.id === id) {
+      closeModal();
+    }
   };
 
   return (
@@ -136,11 +138,13 @@ const ImageGrid = forwardRef((props, ref) => {
         className="my-masonry-grid"
         columnClassName="my-masonry-grid_column"
       >
-        {images.map((image, index) => (
+        {images.map((image) => (
           <ImageItem
-            key={`${image.id}-${index}`}
-            src={`${API_URL}/image/${image.id}`}
-            onClick={() => openModal(`${API_URL}/image/${image.id}`)}
+            key={image.id}
+            src={`${API_URL}/api/image/${image.id}`} // 确保 URL 一致
+            id={image.id}
+            onClick={() => openModal(image.id, `${API_URL}/api/image/${image.id}`)}
+            onDelete={handleDelete}
           />
         ))}
       </Masonry>
@@ -152,18 +156,18 @@ const ImageGrid = forwardRef((props, ref) => {
 
       {/* 模态框 */}
       <Modal
-        isOpen={selectedImage !== null}
+        isOpen={selectedImage.src !== null}
         onRequestClose={closeModal}
         contentLabel="图片预览"
         className={`modal ${imageOrientation}`}
         overlayClassName="overlay"
         closeTimeoutMS={300} // 过渡时间，需与 CSS transition 一致
       >
-        {selectedImage && (
+        {selectedImage.src && (
           <div className="modal-content">
             {/* 直接显示图片，无需额外背景层 */}
             <img
-              src={selectedImage}
+              src={selectedImage.src}
               alt="Full Size"
               className="modal-image"
             />

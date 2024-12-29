@@ -1,55 +1,65 @@
 // UploadButton.js
 import React, { useState } from 'react';
+import axios from 'axios';
 import './UploadButton.css';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
 const UploadButton = ({ onUploadSuccess }) => {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-  // 当用户选中文件时立即上传
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     setError(null);
 
-    // 开始上传
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      setError('不支持的文件类型，请上传 JPG、PNG、GIF 或 WEBP 格式的图片。');
+      event.target.value = null;
+      return;
+    }
+
     setUploading(true);
+    setUploadProgress(0);
 
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      const response = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
+      const response = await axios.post(`${API_URL}/api/upload`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percentCompleted);
+        },
       });
-      const data = await response.json();
 
-      if (response.ok) {
+      if (response.status === 200) {
         alert('图片上传成功！');
-        // 通知父组件刷新图片列表
         if (onUploadSuccess) {
           onUploadSuccess();
         }
       } else {
-        setError(data.error || '上传失败');
+        setError(response.data.error || '上传失败');
       }
     } catch (err) {
       console.error('Error uploading image:', err);
       setError('上传过程中发生错误');
     } finally {
       setUploading(false);
-      // 重置 file input 的值，方便下次上传
       event.target.value = null;
     }
   };
 
   return (
     <div className="upload-container">
-      {/* 隐藏的文件选择 */}
       <input
         type="file"
         accept="image/*"
@@ -58,9 +68,8 @@ const UploadButton = ({ onUploadSuccess }) => {
         style={{ display: 'none' }}
       />
 
-      {/* “上传”按钮 */}
-      <label htmlFor="file-input" className="upload-button small-btn">
-        {uploading ? '上传中...' : '上传'}
+      <label htmlFor="file-input" className={`upload-button small-btn ${uploading ? 'disabled' : ''}`}>
+        {uploading ? `上传中... (${uploadProgress}%)` : '上传'}
       </label>
 
       {error && <div className="error-message">{error}</div>}

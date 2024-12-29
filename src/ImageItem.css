@@ -1,0 +1,29 @@
+/* ImageGrid.css */
+
+/* 模态框覆盖层 */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.2); /* 半透明白色背景 */
+  backdrop-filter: blur(10px); /* 毛玻璃效果 */
+  -webkit-backdrop-filter: blur(10px); /* 毛玻璃效果 - Safari */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 300ms ease-in-out;
+  z-index: 1000; /* 确保覆盖层高于上传按钮 */
+}
+
+.overlay.ReactModal__Overlay--after-open {
+  opacity: 1;
+}
+
+.overlay.ReactModal__Overlay--before-close {
+  opacity: 0;
+}
+
+/* 其他模态框样式保持不变 */

@@ -1,0 +1,57 @@
+/* UploadButton.css */
+
+/* 如果原有的 .upload-button 里 padding 比较大，可以在这里改小 */
+.upload-button {
+    background-color: #007bff;
+    color: white;
+    border-radius: 25px;
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 0.3s;
+    /* 原来的 padding 可能比较大，这里改小一点 */
+    padding: 6px 10px; 
+    margin: 5px;
+    font-size: 0.9rem; /* 字体小一点 */
+  }
+  
+  /* 让按钮在悬停时变色 */
+  .upload-button:hover {
+    background-color: #0056b3;
+  }
+  
+  /* “确认上传”按钮 */
+  .actual-button {
+    background-color: #28a745;
+  }
+  
+  .actual-button:hover {
+    background-color: #1e7e34;
+  }
+  
+  /* 禁用时 */
+  .upload-button:disabled,
+  .actual-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+  }
+  
+  /* 用于区分更小的按钮，或者直接在 .upload-button 上改 */
+  .small-btn {
+    padding: 6px 10px;  /* 确保更小的按钮 */
+    font-size: 0.8rem;
+  }
+  
+  /* 容器 */
+  .upload-container {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  /* 错误信息 */
+  .error-message {
+    color: red;
+    margin-top: 5px;
+    font-size: 0.9rem;
+  }
+  

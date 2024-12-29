@@ -1,0 +1,167 @@
+/* ImageGrid.css */
+
+.image-grid-container {
+  width: 100%;
+  margin: 0 auto;
+  padding: 10px;
+}
+
+.my-masonry-grid {
+  display: flex;
+  margin-left: -10px; /* gutter size offset */
+  width: auto;
+}
+
+.my-masonry-grid_column {
+  padding-left: 10px; /* gutter size */
+  background-clip: padding-box;
+}
+
+/* Style your items */
+.image-item {
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer; /* 鼠标悬停时显示为指针 */
+}
+
+.image-item img {
+  width: 100%;
+  display: block;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+/* Loading and end messages */
+.loading,
+.end {
+  text-align: center;
+  margin: 20px 0;
+  color: #555;
+}
+
+/* 模态框覆盖层 */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.2); /* 半透明白色背景 */
+  backdrop-filter: blur(10px); /* 毛玻璃效果 */
+  -webkit-backdrop-filter: blur(10px); /* 毛玻璃效果 - Safari */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 300ms ease-in-out;
+  z-index: 1000; /* 确保覆盖层高于上传按钮 */
+}
+
+.overlay.ReactModal__Overlay--after-open {
+  opacity: 1;
+}
+
+.overlay.ReactModal__Overlay--before-close {
+  opacity: 0;
+}
+
+/* 模态框基本样式 */
+.modal {
+  position: relative;
+  background: transparent; /* 背景透明，毛玻璃由覆盖层实现 */
+  padding: 0;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 300ms ease-in-out, transform 300ms ease-in-out;
+  box-shadow: none; /* 移除模态框的阴影 */
+  outline: none;    /* 移除模态框的轮廓 */
+}
+
+.ReactModal__Content--after-open {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.ReactModal__Content--before-close {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+/* 模态框内容容器 */
+.modal-content {
+  position: relative; /* 以便图片定位 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 默认尺寸为横向 */
+  width: 50vw;   
+  height: 50vh;  
+  border: none;         /* 移除边框 */
+  outline: none;        /* 移除焦点轮廓 */
+  box-shadow: none;     /* 移除阴影 */
+}
+
+/* 模态框内容容器 - 纵向图片 */
+.modal.portrait .modal-content {
+  width: 30vw;   /* 视口宽度的30% */
+  height: 60vh;  /* 视口高度的60% */
+}
+
+/* 模态框内容容器 - 横向图片 */
+.modal.landscape .modal-content {
+  width: 50vw;   /* 视口宽度的50% */
+  height: 50vh;  /* 视口高度的50% */
+}
+
+/* 模态框中的图片 */
+.modal-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain; /* 保持等比缩放 */
+  border-radius: 8px;
+  border: none;         /* 移除边框 */
+  outline: none;        /* 移除焦点轮廓 */
+}
+
+/* 移除模态框内所有元素的边框和轮廓 */
+.modal * {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 响应式调整 */
+@media (max-width: 600px) {
+  .modal-content {
+    width: 80vw;   /* 在小屏幕上占据80%视口宽度 */
+    height: 80vh;  /* 在小屏幕上占据80%视口高度 */
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1200px) {
+  .modal-content {
+    width: 50vw;   /* 中等屏幕占据50%视口宽度 */
+    height: 80vh;  /* 中等屏幕占据80%视口高度 */
+  }
+
+  .modal.landscape .modal-content {
+    height: 50vh;  /* 中等屏幕占据50%视口高度 */
+  }
+}
+
+@media (min-width: 1201px) {
+  .modal.portrait .modal-content {
+    width: 30vw;   /* 大屏幕占据30%视口宽度 */
+    height: 60vh;  /* 大屏幕占据60%视口高度 */
+  }
+
+  .modal.landscape .modal-content {
+    width: 50vw;   /* 大屏幕占据50%视口宽度 */
+    height: 50vh;  /* 大屏幕占据50%视口高度 */
+  }
+}

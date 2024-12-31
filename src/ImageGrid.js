@@ -33,11 +33,12 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   }));
 
   const loadImages = useCallback(async () => {
+    // 如果正在加载、没有更多数据了，或当前页已经加载过了，则不再请求
     if (loading || !hasMore || loadedPages.current.has(page)) return;
-
+  
     setLoading(true);
     loadedPages.current.add(page);
-
+  
     try {
       const response = await fetch(`${API_URL}/api/images?page=${page}`, {
         method: 'GET',
@@ -46,16 +47,27 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
         },
         mode: 'cors',
       });
-
+  
+      if (!response.ok) {
+        throw new Error(`Network response was not ok. status: ${response.status}`);
+      }
+  
       const data = await response.json();
-
+  
       if (data.images && data.images.length > 0) {
         setImages((prev) => [...prev, ...data.images]);
       } else {
+        // 正常返回但没有数据了，停止加载
         setHasMore(false);
       }
     } catch (error) {
       console.error('加载图片时出错:', error);
+      // 如果后端连接失败或跨域出错，可根据需求：
+      // 1. 直接停止所有后续请求
+      setHasMore(false);
+  
+      // 2. 如果希望允许用户后续点击“重试”之类的操作再拉取，可以把当前页从 loadedPages 中移除:
+      // loadedPages.current.delete(page);
     } finally {
       setLoading(false);
     }

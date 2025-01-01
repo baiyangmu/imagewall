@@ -94,16 +94,17 @@
 
 /* 模态框内容容器 */
 .modal-content {
-  position: relative; /* 以便图片定位 */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 默认尺寸为横向 */
-  width: 50vw;   
-  height: 50vh;  
-  border: none;         /* 移除边框 */
-  outline: none;        /* 移除焦点轮廓 */
-  box-shadow: none;     /* 移除阴影 */
+  width: auto; /* 自动宽度 */
+  height: auto; /* 自动高度 */
+  max-width: 90vw; /* 最大宽度为视口的 90% */
+  max-height: 90vh; /* 最大高度为视口的 90% */
+  border: none; /* 移除边框 */
+  outline: none; /* 移除焦点轮廓 */
+  box-shadow: none; /* 移除阴影 */
 }
 
 /* 模态框内容容器 - 纵向图片 */

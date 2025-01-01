@@ -18,7 +18,8 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   // 模态框状态
   const [selectedImage, setSelectedImage] = useState({ id: null, src: null });
   const [imageOrientation, setImageOrientation] = useState('landscape'); // 'portrait' 或 'landscape'
-
+  const [modalContentSize, setModaContentSize] = useState({ width: 0, height: 0 });
+  
   const observer = useRef();
   const triggerRef = useRef();
   const loadedPages = useRef(new Set());
@@ -97,6 +98,19 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     };
   }, [loading, hasMore]);
 
+  useEffect(() => {
+    const handleResize = () => {
+      if (selectedImage) {
+        openModal(selectedImage.id, selectedImage.src);
+      }
+    };
+  
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [selectedImage]);
+
   // 保持用户提供的 breakpointColumnsObj 配置
   const breakpointColumnsObj = {
     default: 5,
@@ -109,21 +123,49 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
 
   // 打开模态框
   const openModal = (id, imageSrc) => {
-    setSelectedImage({ id, src: imageSrc });
-
+    setSelectedImage({ id, src: imageSrc });  
     // 创建一个新的 Image 对象来获取自然尺寸
     const img = new Image();
     img.src = imageSrc;
+  
     img.onload = () => {
-      const naturalWidth = img.naturalWidth;
-      const naturalHeight = img.naturalHeight;
-
+      const { naturalWidth, naturalHeight } = img;
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+  
+      let modalContentWidth, modalContentHeight;
+  
       // 判断图片方向
       if (naturalHeight > naturalWidth) {
+        // 纵向图片
         setImageOrientation('portrait');
+  
+        if (screenHeight / screenWidth > naturalHeight / naturalWidth) {
+          // 屏幕更"高"，以宽度为基准
+          modalContentWidth = screenWidth * 0.9;
+          modalContentHeight = modalContentWidth * (naturalHeight / naturalWidth);
+        } else {
+          // 屏幕更"宽"，以高度为基准
+          modalContentHeight = screenHeight * 0.9;
+          modalContentWidth = modalContentHeight * (naturalWidth / naturalHeight);
+        }
       } else {
+        // 横向图片
         setImageOrientation('landscape');
+  
+        if (screenWidth / screenHeight > naturalWidth / naturalHeight) {
+          // 屏幕更"宽"，以高度为基准
+          modalContentHeight = screenHeight * 0.9;
+          modalContentWidth = modalContentHeight * (naturalWidth / naturalHeight);
+        } else {
+          // 屏幕更"高"，以宽度为基准
+          modalContentWidth = screenWidth * 0.9;
+          modalContentHeight = modalContentWidth * (naturalHeight / naturalWidth);
+        }
       }
+  
+      // 设置模态框的宽高
+      setModaContentSize({ width: modalContentWidth, height: modalContentHeight });
     };
   };
 
@@ -176,14 +218,19 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
         closeTimeoutMS={300} // 过渡时间，需与 CSS transition 一致
       >
         {selectedImage.src && (
-          <div className="modal-content">
-            {/* 直接显示图片，无需额外背景层 */}
-            <img
-              src={selectedImage.src}
-              alt="Full Size"
-              className="modal-image"
-            />
-          </div>
+          <div 
+          className="modal-content"
+          style={{
+            width: `${modalContentSize.width}px`,
+            height: `${modalContentSize.height}px`,
+          }}
+        >
+          <img
+            src={selectedImage.src}
+            alt="Full Size"
+            className="modal-image"
+          />
+        </div>
         )}
       </Modal>
     </div>

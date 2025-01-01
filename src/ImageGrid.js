@@ -14,12 +14,17 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  
+  const [allImageIds, setAllImageIds] = useState([]); 
+  const isLandscape = window.innerWidth > window.innerHeight;
+
+
   // 模态框状态
   const [selectedImage, setSelectedImage] = useState({ id: null, src: null });
   const [imageOrientation, setImageOrientation] = useState('landscape'); // 'portrait' 或 'landscape'
   const [modalContentSize, setModaContentSize] = useState({ width: 0, height: 0 });
-  
+  const [currentIndex, setCurrentIndex] = useState(null);
+
+
   const observer = useRef();
   const triggerRef = useRef();
   const loadedPages = useRef(new Set());
@@ -32,6 +37,35 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
       loadedPages.current.clear();
     },
   }));
+
+  const fetchAllImageIds = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/images/all_ids`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+      });
+  
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image IDs: ${response.status}`);
+      }
+  
+      const data = await response.json();
+      setAllImageIds(data.images); // 假设返回的数据格式为 { images: [{ id: 1, src: '/api/image/1' }, ...] }
+    } catch (error) {
+      console.error('加载所有图片 ID 出错:', error);
+    }
+  }, []);
+  
+  useEffect(() => {
+    fetchAllImageIds();
+  }, [fetchAllImageIds]);
+
+  useEffect(() => {
+    fetchAllImageIds();
+  }, [fetchAllImageIds]);
 
   const loadImages = useCallback(async () => {
     // 如果正在加载、没有更多数据了，或当前页已经加载过了，则不再请求
@@ -120,10 +154,40 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     600: 2,
     300: 1
   };
+  
+
+    // 切换到上一张图片
+  const prevImage = () => {
+    if (currentIndex > 0) {
+      const newIndex = currentIndex - 1;
+      setCurrentIndex(newIndex);
+      const newImage = allImageIds[newIndex];
+      openModal(newImage.id, `${API_URL}/api/image/${newImage.id}`);
+    } else {
+      console.log('已经是第一张图片');
+    }
+  };
+
+  // 切换到下一张图片
+  const nextImage = () => {
+    if (currentIndex < allImageIds.length - 1) {
+      const newIndex = currentIndex + 1;
+      setCurrentIndex(newIndex);
+      const newImage = allImageIds[newIndex];
+      openModal(newImage.id, `${API_URL}/api/image/${newImage.id}`);
+    } else {
+      console.log('已经是最后一张图片');
+    }
+  };
+    
 
   // 打开模态框
   const openModal = (id, imageSrc) => {
-    setSelectedImage({ id, src: imageSrc });  
+    const index = allImageIds.findIndex((image) => image.id === id);
+    if (index !== -1) {
+      setCurrentIndex(index);
+      setSelectedImage({ id, src: imageSrc });
+    } 
     // 创建一个新的 Image 对象来获取自然尺寸
     const img = new Image();
     img.src = imageSrc;
@@ -225,6 +289,28 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
             height: `${modalContentSize.height}px`,
           }}
         >
+          {isLandscape ? (
+            <>
+              {/* 横屏，左右切换 */}
+              {currentIndex > 0 && (
+                <div className="nav-button circle left" onClick={prevImage}></div>
+              )}
+              {currentIndex < images.length - 1 && (
+                <div className="nav-button circle right" onClick={nextImage}></div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* 竖屏，上下切换 */}
+              {currentIndex > 0 && (
+                <div className="nav-button circle top" onClick={prevImage}></div>
+              )}
+              {currentIndex < images.length - 1 && (
+                <div className="nav-button circle bottom" onClick={nextImage}></div>
+              )}
+            </>
+          )}
+          {/* 图片展示 */}
           <img
             src={selectedImage.src}
             alt="Full Size"

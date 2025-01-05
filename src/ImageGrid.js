@@ -16,6 +16,8 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   const [hasMore, setHasMore] = useState(true);
   const [allImageIds, setAllImageIds] = useState([]); 
   const isLandscape = window.innerWidth > window.innerHeight;
+  const [startTouch, setStartTouch] = useState(0); // 记录触摸起始点
+  const [dragDistance, setDragDistance] = useState(0); // 拖动的距离
 
 
   // 模态框状态
@@ -154,7 +156,29 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     600: 2,
     300: 1
   };
-  
+
+  const handleTouchStart = (e) => {
+    const touchStartX = e.touches[0].clientX; // 获取第一个触摸点的 X 坐标
+    setStartTouch(touchStartX);
+  };
+    // 触摸移动时
+  const handleTouchMove = (e) => {
+    const touchMoveX = e.touches[0].clientX; // 获取当前触摸点的 X 坐标
+    const distance = touchMoveX - startTouch; // 计算拖动的距离
+    setDragDistance(distance);
+  };
+
+    // 触摸结束时
+  const handleTouchEnd = () => {
+    if (dragDistance > 100) {
+      prevImage(); // 向右拖动，切换到上一页
+    } else if (dragDistance < -100) {
+      nextImage(); // 向左拖动，切换到下一页
+    }
+
+    setDragDistance(0); // 重置拖动距离
+  };
+
 
     // 切换到上一张图片
   const prevImage = () => {
@@ -274,50 +298,72 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
 
       {/* 模态框 */}
       <Modal
-        isOpen={selectedImage.src !== null}
+        isOpen={!!selectedImage.src}
         onRequestClose={closeModal}
-        contentLabel="图片预览"
-        className={`modal ${imageOrientation}`}
         overlayClassName="overlay"
-        closeTimeoutMS={300} // 过渡时间，需与 CSS transition 一致
-      >
-        {selectedImage.src && (
+        className={`modal ${imageOrientation}`}
+        closeTimeoutMS={300}
+        /**
+         * 关键点1：禁用React-Modal自带的“点overlay关闭”功能
+         * 然后由我们自己在 overlayElement 上手动管理点击事件
+         */
+        shouldCloseOnOverlayClick={false}
+        overlayElement={(overlayProps, contentElement) => (
+          // 关键点2：最外层 overlay, 点击它 => 关闭模态
           <div 
+            {...overlayProps} 
+            onClick={closeModal} // 点击最外层 => 关闭
+          >
+            {/*
+              关键点3：包一层“内容容器” (innerWrapper)，阻止冒泡。
+              里面再放真正的 modalContent + 按钮等。
+            */}
+            <div onClick={(e) => e.stopPropagation()}>
+              {contentElement}
+
+              {selectedImage.src && (
+                <>
+                  <div
+                    className="nav-button prev"
+                    onClick={(e) => {
+                      e.stopPropagation(); // 阻止冒泡
+                      prevImage();
+                    }}
+                  >
+                    {"<"}
+                  </div>
+                  <div
+                    className="nav-button next"
+                    onClick={(e) => {
+                      e.stopPropagation(); // 阻止冒泡
+                      nextImage();
+                    }}
+                  >
+                    {">"}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      >
+        {/* 这部分就是 modal-content（contentElement） */}
+        <div 
           className="modal-content"
           style={{
             width: `${modalContentSize.width}px`,
             height: `${modalContentSize.height}px`,
           }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
-          {isLandscape ? (
-            <>
-              {/* 横屏，左右切换 */}
-              {currentIndex > 0 && (
-                <div className="nav-button circle left" onClick={prevImage}></div>
-              )}
-              {currentIndex < images.length - 1 && (
-                <div className="nav-button circle right" onClick={nextImage}></div>
-              )}
-            </>
-          ) : (
-            <>
-              {/* 竖屏，上下切换 */}
-              {currentIndex > 0 && (
-                <div className="nav-button circle top" onClick={prevImage}></div>
-              )}
-              {currentIndex < images.length - 1 && (
-                <div className="nav-button circle bottom" onClick={nextImage}></div>
-              )}
-            </>
-          )}
-          {/* 图片展示 */}
           <img
             src={selectedImage.src}
             alt="Full Size"
             className="modal-image"
           />
         </div>
-        )}
       </Modal>
     </div>
   );

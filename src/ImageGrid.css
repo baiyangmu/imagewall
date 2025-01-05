@@ -137,52 +137,40 @@
 }
 
 /* 圆形导航按钮基础样式 */
-.nav-button.circle {
-  position: absolute;
-  width: 200px; /* 圆形直径为 3 倍 */
-  height: 200px;
-  background: rgba(255, 255, 255, 0); /* 默认完全透明 */
-  border-radius: 50%; /* 圆形按钮 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.nav-button {
+  position: fixed; /* 让按钮绝对定位 */
+  top: 50%; /* 父容器的 50% */
+  transform: translateY(-50%); /* 通过 transform 移动自身 50% */
+  width: 50px; /* 按钮宽度 */
+  height: 100px; /* 按钮高度：将高度缩小 */
+  background: rgba(255, 255, 255, 0); /* 背景透明 */
+  color: #111; /* 按钮文字颜色 */
+  font-size: 24px; /* 按钮文字大小 */
+  display: flex; /* 使用 Flexbox */
+  justify-content: center; /* 水平居中内容 */
+  align-items: center; /* 垂直居中内容 */
+  border: none;
   cursor: pointer;
-  z-index: 10; /* 确保按钮位于图片之上 */
-  transition: background 0.3s ease, opacity 0.3s ease; /* 背景和透明度过渡 */
-  opacity: 0; /* 默认隐藏 */
+  z-index: 9999;
+  opacity: 0; /* 初始半透明 */
+  transition: opacity 0.3s ease, background 0.3s ease;
 }
 
 /* 鼠标悬停按钮时 */
-.nav-button.circle:hover {
-  background: rgba(255, 255, 255, 0.8); /* 增加透明度 */
-  opacity: 1; /* 显示按钮 */
+.nav-button:hover {
+  background: rgba(78, 77, 77, 0.2); /* 增加透明度 */
+  opacity: 1; /* 鼠标悬停时半透明 */
 }
 
 /* 定义左右圆形按钮位置 */
-.nav-button.circle.left {
-  top: 50%;
-  left: -10px; /* 距离左侧 10px */
-  transform: translateY(-50%);
+.nav-button.prev {
+  left: 20px; /* 靠左对齐 */
 }
 
-.nav-button.circle.right {
-  top: 50%;
-  right: -10px; /* 距离右侧 10px */
-  transform: translateY(-50%);
+.nav-button.next {
+  right: 20px; /* 靠右对齐 */
 }
 
-/* 定义上下圆形按钮位置 */
-.nav-button.circle.top {
-  top: -120px; /* 距离顶部 10px */
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.nav-button.circle.bottom {
-  bottom: -120px; /* 距离底部 10px */
-  left: 50%;
-  transform: translateX(-50%);
-}
 /* 响应式调整 */
 @media (max-width: 600px) {
   .modal-content {

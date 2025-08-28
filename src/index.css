@@ -8,3 +8,9 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* Modal 打开时禁止页面滚动（react-modal 会自动加这些类名） */
+body.ReactModal__Body--open,
+html.ReactModal__Html--open {
+  overflow: hidden;
+}

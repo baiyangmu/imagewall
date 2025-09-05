@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import './UploadButton.css';
+import ImageService from './services/ImageService';
+import useDeviceId from './hooks/useDeviceId';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -10,6 +12,8 @@ const UploadButton = ({ onUploadSuccess }) => {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  const deviceId = useDeviceId();
 
   const handleFileChange = async (event) => {
     const files = event.target.files;
@@ -26,30 +30,17 @@ const UploadButton = ({ onUploadSuccess }) => {
 
     setUploading(true);
     setUploadProgress(0);
-
-    const formData = new FormData();
-    Array.from(files).forEach(file => formData.append('files', file)); // 批量上传文件
-
     try {
-      const response = await axios.post(`${API_URL}/api/upload`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(percentCompleted);
-        },
-      });
-
-      if (response.status === 200) {
-        if (onUploadSuccess) {
-          onUploadSuccess();
-        }
+      // Use ImageService to upload to local mydb-backed storage
+      await ImageService.initMyDB();
+      const res = await ImageService.uploadImages(Array.from(files), deviceId || 'unknown');
+      if (res && res.uploaded_ids && res.uploaded_ids.length > 0) {
+        if (onUploadSuccess) onUploadSuccess();
       } else {
-        setError(response.data.error || '上传失败');
+        setError('上传失败（本地）');
       }
     } catch (err) {
-      console.error('Error uploading images:', err);
+      console.error('Local upload error', err);
       setError('上传过程中发生错误');
     } finally {
       setUploading(false);

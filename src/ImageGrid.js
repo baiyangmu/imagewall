@@ -8,9 +8,11 @@ import './ImageGrid.css';
 Modal.setAppElement('#root');
 
 const API_URL = process.env.REACT_APP_API_URL;
+import ImageService from './services/ImageService';
 
 const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   const [images, setImages] = useState([]);
+  const [blobMap, setBlobMap] = useState({}); // id -> objectURL
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -42,20 +44,8 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
 
   const fetchAllImageIds = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/images/all_ids`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors',
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Failed to fetch image IDs: ${response.status}`);
-      }
-  
-      const data = await response.json();
-      setAllImageIds(data.images); // 假设返回的数据格式为 { images: [{ id: 1, src: '/api/image/1' }, ...] }
+      const rows = await ImageService.getAllImageIds();
+      setAllImageIds(rows);
     } catch (error) {
       console.error('加载所有图片 ID 出错:', error);
     }
@@ -77,34 +67,29 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     loadedPages.current.add(page);
   
     try {
-      const response = await fetch(`${API_URL}/api/images?page=${page}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors',
-      });
-  
-      if (!response.ok) {
-        throw new Error(`Network response was not ok. status: ${response.status}`);
-      }
-  
-      const data = await response.json();
-  
-      if (data.images && data.images.length > 0) {
-        setImages((prev) => [...prev, ...data.images]);
+      const rows = await ImageService.getImages(page, 10);
+      if (rows && rows.length > 0) {
+        setImages((prev) => [...prev, ...rows]);
+        // preload blobs for new rows
+        for (const r of rows) {
+          // avoid duplicate fetch
+          if (blobMap[r.id]) continue;
+          (async () => {
+            try {
+              const { meta, blob } = await ImageService.getImage(r.id);
+              if (blob) {
+                const url = URL.createObjectURL(blob);
+                setBlobMap((m) => ({ ...m, [r.id]: url }));
+              }
+            } catch (e) { console.warn('preload blob failed', e); }
+          })();
+        }
       } else {
-        // 正常返回但没有数据了，停止加载
         setHasMore(false);
       }
     } catch (error) {
       console.error('加载图片时出错:', error);
-      // 如果后端连接失败或跨域出错，可根据需求：
-      // 1. 直接停止所有后续请求
       setHasMore(false);
-  
-      // 2. 如果希望允许用户后续点击“重试”之类的操作再拉取，可以把当前页从 loadedPages 中移除:
-      // loadedPages.current.delete(page);
     } finally {
       setLoading(false);
     }
@@ -263,6 +248,13 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     setImageOrientation('landscape'); // 重置为默认
   };
 
+  // cleanup objectURLs when component unmounts
+  useEffect(() => {
+    return () => {
+      Object.values(blobMap).forEach(url => { try { URL.revokeObjectURL(url); } catch(e){} });
+    };
+  }, [blobMap]);
+
   // 处理图片删除
   const handleDelete = (id) => {
     setImages((prevImages) => prevImages.filter((image) => image.id !== id));
@@ -283,9 +275,9 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
         {images.map((image) => (
           <ImageItem
             key={image.id}
-            src={`${API_URL}/api/image/${image.id}`} // 确保 URL 一致
+            src={blobMap[image.id] ? blobMap[image.id] : ''}
             id={image.id}
-            onClick={() => openModal(image.id, `${API_URL}/api/image/${image.id}`)}
+            onClick={() => openModal(image.id, blobMap[image.id] || '')}
             onDelete={handleDelete}
           />
         ))}

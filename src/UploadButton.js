@@ -36,6 +36,8 @@ const UploadButton = ({ onUploadSuccess }) => {
       const res = await ImageService.uploadImages(Array.from(files), deviceId || 'unknown');
       if (res && res.uploaded_ids && res.uploaded_ids.length > 0) {
         if (onUploadSuccess) onUploadSuccess();
+        // full reload to ensure new data is shown (matches delete behavior)
+        try { window.location.reload(); } catch (e) { /* ignore in non-browser env */ }
       } else {
         setError('上传失败（本地）');
       }

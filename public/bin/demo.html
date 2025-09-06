@@ -21,7 +21,7 @@
   <h3>Output</h3>
   <pre id="out">(no output)</pre>
 
-  <script src="../bin/mydb.js"></script>
+  <script src="./mydb.js"></script>
   <script>
     const execBtn = document.getElementById('exec');
     const sqlEl = document.getElementById('sql');
@@ -123,11 +123,15 @@
 
 
 /**
+
 emcc db.c sql_lexer.c sql_parser.c -o /Users/baiyangmu333/Projects/db_learn/db_tutorial-master/src/bin/mydb.js \
+  -O2 \
   -s MODULARIZE=1 \
-  -s EXPORT_NAME="MyDB" \
+  -s EXPORT_NAME='MyDB' \
   -s EXPORTED_FUNCTIONS='["_mydb_open_with_ems","_mydb_close_with_ems","_mydb_execute_json_with_ems","_mydb_open","_mydb_close","_mydb_execute_json","_malloc","_free"]' \
-  -s EXPORTED_RUNTIME_METHODS='["cwrap","ccall","UTF8ToString","stringToUTF8","lengthBytesUTF8","getValue","setValue","FS","IDBFS","allocateUTF8"]' \
-  -lidbfs.js \
-  -sFORCE_FILESYSTEM
+  -s EXPORTED_RUNTIME_METHODS='["cwrap","ccall","UTF8ToString","stringToUTF8","lengthBytesUTF8","getValue","setValue","FS","IDBFS","allocateUTF8","HEAPU8","writeArrayToMemory"]' \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s FORCE_FILESYSTEM=1 \
+  -s ENVIRONMENT='web' \
+  -lidbfs.js
 */

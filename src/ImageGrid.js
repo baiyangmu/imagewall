@@ -4,11 +4,10 @@ import Masonry from 'react-masonry-css';
 import ImageItem from './ImageItem';
 import Modal from 'react-modal';
 import './ImageGrid.css';
+import ImageService from './services/ImageService';
 
 Modal.setAppElement('#root');
 
-const API_URL = process.env.REACT_APP_API_URL;
-import ImageService from './services/ImageService';
 
 const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
   const [images, setImages] = useState([]);
@@ -93,7 +92,7 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     } finally {
       setLoading(false);
     }
-  }, [API_URL, page, loading, hasMore]);
+  }, [page, loading, hasMore]);
 
   useEffect(() => {
     loadImages();
@@ -166,42 +165,45 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
 
 
     // 切换到上一张图片
-  const prevImage = () => {
+  const prevImage = async () => {
     if (currentIndex > 0) {
       const newIndex = currentIndex - 1;
       setCurrentIndex(newIndex);
       const newImage = allImageIds[newIndex];
-      openModal(newImage.id, `${API_URL}/api/image/${newImage.id}`);
+      await openModal(newImage.id);
     } else {
       console.log('已经是第一张图片');
     }
   };
 
   // 切换到下一张图片
-  const nextImage = () => {
+  const nextImage = async () => {
     if (currentIndex < allImageIds.length - 1) {
       const newIndex = currentIndex + 1;
       setCurrentIndex(newIndex);
       const newImage = allImageIds[newIndex];
-      openModal(newImage.id, `${API_URL}/api/image/${newImage.id}`);
+      await openModal(newImage.id);
     } else {
       console.log('已经是最后一张图片');
     }
   };
     
 
-  // 打开模态框
-  const openModal = (id, imageSrc) => {
+  // 打开模态框，使用本地获取 blob 的方式
+  const openModal = async (id) => {
     const index = allImageIds.findIndex((image) => image.id === id);
     if (index !== -1) {
       setCurrentIndex(index);
-      setSelectedImage({ id, src: imageSrc });
-    } 
-    // 创建一个新的 Image 对象来获取自然尺寸
-    const img = new Image();
-    img.src = imageSrc;
+    }
+    try {
+      const { meta, blob } = await ImageService.getImage(id);
+      const src = blob ? URL.createObjectURL(blob) : '';
+      setSelectedImage({ id, src });
+      // 创建一个新的 Image 对象来获取自然尺寸
+      const img = new Image();
+      img.src = src;
   
-    img.onload = () => {
+      img.onload = () => {
       const { naturalWidth, naturalHeight } = img;
       const screenWidth = window.innerWidth;
       const screenHeight = window.innerHeight;
@@ -240,6 +242,9 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
       // 设置模态框的宽高
       setModaContentSize({ width: modalContentWidth, height: modalContentHeight });
     };
+    } catch (err) {
+      console.warn('openModal error', err);
+    }
   };
 
   // 关闭模态框

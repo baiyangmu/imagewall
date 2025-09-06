@@ -4,7 +4,7 @@ import './UploadButton.css';
 import ImageService from './services/ImageService';
 import useDeviceId from './hooks/useDeviceId';
 
-const API_URL = process.env.REACT_APP_API_URL;
+// removed API_URL; uploads use local ImageService
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 

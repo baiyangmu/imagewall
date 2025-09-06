@@ -34,10 +34,55 @@ export function loadMyDBModule() {
 
 export async function ensurePersistentFS(Module) {
   try { Module.FS.mkdir('/persistent'); } catch (e) {}
-  try { Module.FS.mount(Module.IDBFS || IDBFS, {}, '/persistent'); } catch (e) {}
+  try { Module.FS.mount(Module.IDBFS, {}, '/persistent'); } catch (e) {}
   return new Promise((resolve, reject) => {
     Module.FS.syncfs(true, function(err){ if (err) reject(err); else resolve(); });
   });
+}
+
+// ensure `images` table exists; create if missing
+export async function ensureImagesTable(Module, handle) {
+  try {
+    // try to switch to images table
+    const { rc, text } = execSQL(Module, handle, 'use images');
+    if (rc === 0) return true;
+    // Table not found or other error -> attempt to create
+    const createSql = 'create table images (id int, device_id string, created_at timestamp, hash string, blob_key string, description string)';
+    try {
+      execSQL(Module, handle, createSql);
+    } catch (e) {
+      // best-effort: ignore errors here
+    }
+    // try again to use it
+    try { execSQL(Module, handle, 'use images'); } catch (e) {}
+    return true;
+  } catch (e) {
+    console.error('ensureImagesTable error', e);
+    return false;
+  }
+}
+
+// return the current max id (integer) from images table, or 0 if none
+export async function getMaxImageId(Module, handle) {
+  try {
+    // ensure table exists
+    try { await ensureImagesTable(Module, handle); } catch (e) {}
+    const { rc, text } = execSQL(Module, handle, 'select id from images order by id desc limit 1 offset 0');
+    if (rc !== 0 || !text) return 0;
+    try {
+      const parsed = JSON.parse(text);
+      const rows = parsed.rows || [];
+      if (!rows.length) return 0;
+      const v = rows[0].id;
+      const n = parseInt(v, 10);
+      return Number.isNaN(n) ? 0 : n;
+    } catch (e) {
+      return 0;
+    }
+  } catch (e) {
+    console.error('getMaxImageId error', e);
+    return 0;
+  }
 }
 
 // open DB file in persistent dir, return handle
@@ -70,6 +115,8 @@ export function execSQL(Module, handle, sql) {
       text = Module.UTF8ToString(outPtr);
       Module._free(outPtr);
     }
+    // Debug: print SQL execution results (rc and returned text)
+    try { console.log('[execSQL]', { sql, rc, text }); } catch (e) {}
     return { rc, text };
   } finally {
     Module._free(outPtrPtr);

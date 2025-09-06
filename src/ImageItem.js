@@ -2,9 +2,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import ConfirmModal from './ConfirmModal'; // 确保已创建该组件
+import { deleteImage as deleteImageLocal } from './services/ImageService';
 import './ImageItem.css';
 
-const API_URL = process.env.REACT_APP_API_URL;
+// remove remote API dependency; use local ImageService instead
 
 const ImageItem = ({ src, id, onClick, onDelete }) => {
   const [isShaking, setIsShaking] = useState(false);
@@ -63,14 +64,11 @@ const ImageItem = ({ src, id, onClick, onDelete }) => {
 
   const handleConfirmDelete = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/image/${id}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
+      const ok = await deleteImageLocal(id);
+      if (ok) {
         onDelete(id);
       } else {
-        const errorData = await response.json();
-        alert(`删除失败：${errorData.error || '未知错误'}`);
+        alert('删除失败');
       }
     } catch (error) {
       console.error('删除图片时出错:', error);

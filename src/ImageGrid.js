@@ -68,18 +68,26 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
     try {
       const rows = await ImageService.getImages(page, 10);
       if (rows && rows.length > 0) {
-        setImages((prev) => [...prev, ...rows]);
-        // preload blobs for new rows
-        for (const r of rows) {
-          // avoid duplicate fetch
+        // filter out any null/invalid rows before adding
+        const validRows = rows.filter(r => r && r.id !== null && r.id !== undefined);
+        if (validRows.length > 0) {
+          setImages((prev) => [...prev, ...validRows]);
+        }
+        // preload blobs for new (valid) rows
+        for (const r of validRows) {
+          // avoid duplicate fetch and guard against invalid id
+          if (!r || r.id === null || r.id === undefined) continue;
           if (blobMap[r.id]) continue;
           (async () => {
             try {
-              const { meta, blob } = await ImageService.getImage(r.id);
-              if (blob) {
-                const url = URL.createObjectURL(blob);
-                setBlobMap((m) => ({ ...m, [r.id]: url }));
+              const res = await ImageService.getImage(r.id);
+              // if meta or blob missing, remove the item from images so it won't be shown
+              if (!res || !res.meta || !res.blob) {
+                setImages((prev) => prev.filter((img) => img.id !== r.id));
+                return;
               }
+              const url = URL.createObjectURL(res.blob);
+              setBlobMap((m) => ({ ...m, [r.id]: url }));
             } catch (e) { console.warn('preload blob failed', e); }
           })();
         }
@@ -196,8 +204,14 @@ const ImageGrid = forwardRef(({ setIsModalOpen }, ref) => {
       setCurrentIndex(index);
     }
     try {
-      const { meta, blob } = await ImageService.getImage(id);
-      const src = blob ? URL.createObjectURL(blob) : '';
+      const res = await ImageService.getImage(id);
+      if (!res || !res.meta || !res.blob) {
+        console.warn('openModal: image meta/blob missing for id', id);
+        // remove invalid image from list to avoid displaying empty item
+        setImages((prev) => prev.filter((img) => img.id !== id));
+        return;
+      }
+      const src = URL.createObjectURL(res.blob);
       setSelectedImage({ id, src });
       // 创建一个新的 Image 对象来获取自然尺寸
       const img = new Image();

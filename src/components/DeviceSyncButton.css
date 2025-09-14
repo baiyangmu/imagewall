@@ -1,0 +1,11 @@
+.device-sync-button{
+  margin-left:8px;
+  padding:8px 12px;
+  border-radius:6px;
+  background:#007bff;
+  color:#fff;
+  border:none;
+}
+.device-sync-button:active{opacity:0.9}
+
+

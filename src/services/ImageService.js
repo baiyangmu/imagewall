@@ -1,4 +1,5 @@
 import { loadMyDBModule, ensurePersistentFS, openDatabase, execSQL, persistFS, ensureImagesTable, getMaxImageId } from './MyDBService';
+import DeviceService from './DeviceService';
 
 // helpers
 async function sha256Hex(arrayBuffer) {
@@ -23,9 +24,28 @@ export async function initMyDB() {
   return cached;
 }
 
-export async function uploadImages(files, deviceId) {
+export async function uploadImages(files) {
   // ensure uploads are serialized via queue
   uploadQueue = uploadQueue.then(async () => {
+    // determine device_id: try to get current device; if none, register one
+    let effectiveDeviceId = null;
+    if (!effectiveDeviceId) {
+      try {
+        const cur = await DeviceService.getCurrentDevice();
+        if (cur && cur.device_id) effectiveDeviceId = cur.device_id;
+      } catch (e) { /* ignore */ }
+    }
+    if (!effectiveDeviceId) {
+      // use DeviceService helper to get or create local device id (consistent with App.js)
+      try {
+        const local = DeviceService.getOrCreateLocalDeviceId();
+        await DeviceService.registerCurrentDevice(local);
+        effectiveDeviceId = local;
+      } catch (e) {
+        effectiveDeviceId = '';
+      }
+    }
+
     const { Module, handle } = await initMyDB();
     // ensure images table exists before inserting
     try { await ensureImagesTable(Module, handle); } catch (e) { console.error('ensureImagesTable failed', e); }
@@ -80,7 +100,7 @@ export async function uploadImages(files, deviceId) {
       // seconds-since-epoch timestamp (e.g. 1756125828)
       const created_at = String(Math.floor(Date.now() / 1000));
       // columns: id device_id created_at hash blob_key description
-      const sql = `insert into images ${id} ${deviceId} ${created_at} ${hash} ${blobKey} ''`;
+      const sql = `insert into images ${id} ${effectiveDeviceId} ${created_at} ${hash} ${blobKey} ''`;
       try {
         const { rc, text } = execSQL(cached.Module || Module, cached.handle || handle, sql);
         if (rc === 0) uploadedIds.push(id);

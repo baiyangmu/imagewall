@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import './UploadButton.css';
 import ImageService from './services/ImageService';
-import useDeviceId from './hooks/useDeviceId';
 
 // removed API_URL; uploads use local ImageService
 
@@ -13,7 +12,6 @@ const UploadButton = ({ onUploadSuccess }) => {
   const [error, setError] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  const deviceId = useDeviceId();
 
   const handleFileChange = async (event) => {
     const files = event.target.files;
@@ -33,7 +31,8 @@ const UploadButton = ({ onUploadSuccess }) => {
     try {
       // Use ImageService to upload to local mydb-backed storage
       await ImageService.initMyDB();
-      const res = await ImageService.uploadImages(Array.from(files), deviceId || 'unknown');
+      // determine device id via DeviceService; register if needed inside ImageService
+      const res = await ImageService.uploadImages(Array.from(files));
       if (res && res.uploaded_ids && res.uploaded_ids.length > 0) {
         if (onUploadSuccess) onUploadSuccess();
         // full reload to ensure new data is shown (matches delete behavior)

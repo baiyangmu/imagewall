@@ -5,8 +5,10 @@ import './SyncManager.css';
 const SyncManager = ({ connectedDevices, onClose }) => {
   const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, completed, error
   const [syncProgress, setSyncProgress] = useState({});
-  const [selectedDevice, setSelectedDevice] = useState('');
   const [logs, setLogs] = useState([]);
+  
+  // 自动使用第一个连接的设备
+  const targetDevice = connectedDevices && connectedDevices.length > 0 ? connectedDevices[0] : null;
 
   useEffect(() => {
     const removeHandler = peerService.onSyncProgress((progress) => {
@@ -69,22 +71,31 @@ const SyncManager = ({ connectedDevices, onClose }) => {
     return removeHandler;
   }, []);
 
+  // 自动开始同步
+  useEffect(() => {
+    if (targetDevice && syncStatus === 'idle') {
+      handleStartSync();
+    }
+  }, [targetDevice, syncStatus]);
+
   const addLog = (message) => {
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
   };
 
   const handleStartSync = async () => {
-    if (!selectedDevice) {
-      alert('请选择目标设备');
+    if (!targetDevice) {
+      console.error('没有可用的目标设备');
+      setSyncStatus('error');
+      addLog('同步失败: 没有可用的目标设备');
       return;
     }
 
     try {
       setSyncStatus('syncing');
       setLogs([]);
-      addLog('开始同步...');
+      addLog(`开始同步到设备: ${targetDevice}`);
       
-      await peerService.startSync(selectedDevice);
+      await peerService.startSync(targetDevice);
     } catch (error) {
       console.error('开始同步失败:', error);
       setSyncStatus('error');
@@ -106,31 +117,13 @@ const SyncManager = ({ connectedDevices, onClose }) => {
       </div>
 
       <div className="sync-body">
-        <div className="device-selection">
-          <label>选择目标设备:</label>
-          <select 
-            value={selectedDevice} 
-            onChange={(e) => setSelectedDevice(e.target.value)}
-            disabled={syncStatus === 'syncing'}
-          >
-            <option value="">请选择设备</option>
-            {connectedDevices.map(deviceId => (
-              <option key={deviceId} value={deviceId}>
-                {deviceId.slice(0, 8)}...
-              </option>
-            ))}
-          </select>
+        <div className="target-device-info">
+          <div style={{marginBottom: '15px', fontSize: '14px', color: '#666'}}>
+            同步目标设备: <strong style={{color: '#007bff', fontFamily: 'monospace'}}>{targetDevice || '无'}</strong>
+          </div>
         </div>
 
         <div className="sync-controls">
-          <button 
-            onClick={handleStartSync}
-            disabled={!selectedDevice || syncStatus === 'syncing'}
-            className="start-sync-btn"
-          >
-            {syncStatus === 'syncing' ? '同步中...' : '开始同步'}
-          </button>
-          
           {syncStatus !== 'idle' && syncStatus !== 'syncing' && (
             <button 
               onClick={handleReset}
@@ -188,16 +181,6 @@ const SyncManager = ({ connectedDevices, onClose }) => {
           </div>
         </div>
 
-        <div className="sync-instructions">
-          <h4>使用说明</h4>
-          <ul>
-            <li>🔗 首先确保两个设备已建立P2P连接</li>
-            <li>📁 选择目标设备，点击"开始同步"</li>
-            <li>🗄️ 系统会先传输数据库文件(test2.db)</li>
-            <li>🖼️ 然后逐个传输所有图片文件</li>
-            <li>🔄 接收完成后会询问是否刷新页面应用更改</li>
-          </ul>
-        </div>
       </div>
     </div>
   );

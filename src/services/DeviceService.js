@@ -120,6 +120,7 @@ export async function registerDevice(deviceId) {
   }, 'registerDevice');
 }
 
+
 /**
  * 获取当前激活的设备信息
  * 查找数据库中标记为is_current=1的设备
@@ -158,41 +159,6 @@ export async function getCurrentDevice() {
   }, 'getCurrentDevice');
 }
 
-/**
- * 通过设备代码查找设备ID
- * 在本地数据库中搜索指定的6位设备代码
- * @param {string} code - 6位设备代码
- * @returns {Promise<string|null>} 设备ID或null
- */
-export async function lookupDeviceByCode(code) {
-  return executeOnTableWithQueue('devices', async (Module, handle) => {
-    // Table existence is now handled by executeOnTable
-    
-    try {
-      const { rc, text } = execSQL(Module, handle, `select device_id from devices where device_code = '${code}' limit 1`);
-      
-      if (rc !== 0 || !text) {
-        return null;
-      }
-      
-      try { 
-        const parsed = JSON.parse(text); 
-        const rows = parsed.rows || []; 
-        
-        if (!rows.length) {
-          return null;
-        }
-        
-        return rows[0].device_id; 
-      } catch (e) { 
-        return null; 
-      }
-    } catch (e) { 
-      console.error('lookupDeviceByCode error', e); 
-      return null; 
-    }
-  }, 'lookupDeviceByCode');
-}
 
 /**
  * 从远程服务器获取设备信息（占位符函数）
@@ -375,14 +341,128 @@ async function getMaxDeviceIdInternal(Module, handle) {
   }
 }
 
+/**
+ * 获取历史连接设备列表
+ * 按连接时间从近到远排列，全量数据不分页
+ * @returns {Promise<Array<{device_code: string, device_id: string, created_at: string}>|null>} 设备列表或null
+ */
+export async function getHistoryDevices() {
+  return executeOnTableWithQueue('devices', async (Module, handle) => {
+    try {
+      // 查询所有连接过的设备，按创建时间倒序排列
+      const { rc, text } = execSQL(Module, handle, `select * from devices order by created_at desc`);
+      
+      if (rc !== 0 || !text) {
+        return [];
+      }
+      
+      try {
+        const parsed = JSON.parse(text);
+        const rows = parsed.rows || [];
+        
+        // 过滤掉当前设备（is_current = 1的设备），只显示有device_code的设备
+        return rows.filter(row => row.device_code && row.is_current !== 1).map(row => ({
+          device_code: row.device_code,
+          device_id: row.device_id,
+          created_at: row.created_at,
+          // 使用created_at作为连接时间显示
+          last_connected_display: formatTimestamp(row.created_at)
+        }));
+      } catch (e) {
+        console.error('解析历史设备数据失败:', e);
+        return [];
+      }
+    } catch (e) {
+      console.error('获取历史设备失败:', e);
+      return [];
+    }
+  }, 'getHistoryDevices');
+}
+
+/**
+ * 检查设备是否在线（通过PeerService检查连接状态）
+ * @param {string} deviceCode - 设备代码
+ * @returns {boolean} 是否在线
+ */
+export function isDeviceOnline(deviceCode) {
+  // 这个函数需要与PeerService配合使用
+  if (typeof window !== 'undefined' && window.peerService) {
+    return window.peerService.getConnectedDevices().includes(deviceCode);
+  }
+  return false;
+}
+
+/**
+ * 获取在线的历史设备列表
+ * 结合历史设备和当前在线状态
+ * @returns {Promise<Array<{device_code: string, device_id: string, created_at: string, is_online: boolean}>>} 设备列表
+ */
+export async function getOnlineHistoryDevices() {
+  try {
+    const historyDevices = await getHistoryDevices();
+    if (!historyDevices) {
+      return [];
+    }
+
+    // 检查每个设备的在线状态
+    return historyDevices.map(device => ({
+      ...device,
+      is_online: isDeviceOnline(device.device_code)
+    })).filter(device => device.is_online); // 只返回在线的设备
+  } catch (e) {
+    console.error('获取在线历史设备失败:', e);
+    return [];
+  }
+}
+
+/**
+ * 格式化时间戳为可读格式
+ * @param {string|number} timestamp - 时间戳（秒）
+ * @returns {string} 格式化后的时间字符串
+ */
+function formatTimestamp(timestamp) {
+  if (!timestamp) return '未知';
+  
+  try {
+    const date = new Date(parseInt(timestamp) * 1000);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) {
+      return '刚刚';
+    } else if (diffMins < 60) {
+      return `${diffMins}分钟前`;
+    } else if (diffHours < 24) {
+      return `${diffHours}小时前`;
+    } else if (diffDays < 7) {
+      return `${diffDays}天前`;
+    } else {
+      return date.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+  } catch (e) {
+    return '时间解析错误';
+  }
+}
+
 // ========== 服务对象导出 ==========
 
 const DeviceService = {
   registerDevice,
-  lookupDeviceByCode,
   registerCurrentDevice,
   getCurrentDevice,
   getOrCreateLocalDeviceId,
+  getHistoryDevices,
+  getOnlineHistoryDevices,
+  isDeviceOnline,
 };
 
 // 在浏览器控制台暴露服务用于测试和调试

@@ -5,10 +5,10 @@ import ImageService from './ImageService';
 class PeerService {
   constructor() {
     this.peer = null;
-    this.connections = new Map(); // target_device_id -> connection
+    this.connections = new Map(); // target_device_code -> connection
     this.isInitialized = false;
     this.connectionHandlers = new Set();
-    this.currentDeviceId = null;
+    this.currentDeviceCode = null;
     
     // 文件传输相关
     this.syncProgressHandlers = new Set();
@@ -20,8 +20,8 @@ class PeerService {
   }
 
   // 初始化PeerJS
-  async initialize(deviceId) {
-    if (this.isInitialized && this.currentDeviceId === deviceId) {
+  async initialize(deviceCode) {
+    if (this.isInitialized && this.currentDeviceCode === deviceCode) {
       return this.peer;
     }
 
@@ -32,13 +32,11 @@ class PeerService {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    this.currentDeviceId = deviceId;
+    this.currentDeviceCode = deviceCode;
     
     try {
       console.log('正在建立局域网P2P连接...');
-      
-      // 为了避免ID冲突，在deviceId后添加时间戳
-      const uniqueDeviceId = `${deviceId}_${Date.now()}`;
+      console.log('使用设备代码:', deviceCode);
       
       // 局域网优化配置
       const config = {
@@ -60,12 +58,12 @@ class PeerService {
         }
       };
 
-      this.peer = new Peer(deviceId, config);
+      this.peer = new Peer(deviceCode, config);
 
       return new Promise((resolve, reject) => {
         this.peer.on('open', (id) => {
-          console.log('局域网P2P服务已启动，设备ID:', id);
-          console.log('提示：在同一局域网的其他设备可以直接连接此ID');
+          console.log('局域网P2P服务已启动，设备代码:', id);
+          console.log('提示：在同一局域网的其他设备可以直接使用6位代码连接');
           this.isInitialized = true;
           resolve(this.peer);
         });
@@ -76,7 +74,7 @@ class PeerService {
           if (error.type === 'network') {
             reject(new Error('网络连接失败，请检查网络设置'));
           } else if (error.type === 'peer-unavailable') {
-            reject(new Error('目标设备不可用，请确认设备ID正确'));
+            reject(new Error('目标设备不可用，请确认设备代码正确'));
           } else {
             reject(new Error(`连接失败: ${error.message}`));
           }
@@ -147,41 +145,41 @@ class PeerService {
   }
 
   // 连接到另一个设备
-  async connectToDevice(targetDeviceId) {
+  async connectToDevice(targetDeviceCode) {
     if (!this.peer || !this.isInitialized) {
       throw new Error('PeerJS未初始化');
     }
 
-    if (targetDeviceId === this.currentDeviceId) {
+    if (targetDeviceCode === this.currentDeviceCode) {
       throw new Error('不能连接到自己');
     }
 
-    if (this.connections.has(targetDeviceId)) {
-      console.log('已经连接到设备:', targetDeviceId);
-      return this.connections.get(targetDeviceId);
+    if (this.connections.has(targetDeviceCode)) {
+      console.log('已经连接到设备:', targetDeviceCode);
+      return this.connections.get(targetDeviceCode);
     }
 
     try {
-      const conn = this.peer.connect(targetDeviceId);
+      const conn = this.peer.connect(targetDeviceCode);
       
       return new Promise((resolve, reject) => {
         conn.on('open', () => {
-          console.log('成功连接到设备:', targetDeviceId);
-          this.connections.set(targetDeviceId, conn);
+          console.log('成功连接到设备:', targetDeviceCode);
+          this.connections.set(targetDeviceCode, conn);
           
           // 设置消息处理 - 统一路由到 handleReceivedMessage
           conn.on('data', (data) => {
-            console.log('收到消息:', data, '来自:', targetDeviceId);
+            console.log('收到消息:', data, '来自:', targetDeviceCode);
             // 统一使用 handleReceivedMessage 处理所有消息
-            this.handleReceivedMessage(data, targetDeviceId);
+            this.handleReceivedMessage(data, targetDeviceCode);
           });
 
           conn.on('close', () => {
-            console.log('与设备断开连接:', targetDeviceId);
-            this.connections.delete(targetDeviceId);
+            console.log('与设备断开连接:', targetDeviceCode);
+            this.connections.delete(targetDeviceCode);
             this.connectionHandlers.forEach(handler => {
               try {
-                handler('disconnected', targetDeviceId);
+                handler('disconnected', targetDeviceCode);
               } catch (e) {
                 console.error('连接处理器错误:', e);
               }
@@ -191,7 +189,7 @@ class PeerService {
           // 通知连接建立
           this.connectionHandlers.forEach(handler => {
             try {
-              handler('connected', targetDeviceId);
+              handler('connected', targetDeviceCode);
             } catch (e) {
               console.error('连接处理器错误:', e);
             }
@@ -207,7 +205,7 @@ class PeerService {
 
         // 超时处理
         setTimeout(() => {
-          if (!this.connections.has(targetDeviceId)) {
+          if (!this.connections.has(targetDeviceCode)) {
             reject(new Error('连接超时'));
           }
         }, 10000);
@@ -219,10 +217,10 @@ class PeerService {
   }
 
   // 发送消息到指定设备
-  sendMessage(targetDeviceId, message) {
-    const conn = this.connections.get(targetDeviceId);
+  sendMessage(targetDeviceCode, message) {
+    const conn = this.connections.get(targetDeviceCode);
     if (!conn) {
-      throw new Error(`未连接到设备: ${targetDeviceId}`);
+      throw new Error(`未连接到设备: ${targetDeviceCode}`);
     }
 
     try {
@@ -233,9 +231,9 @@ class PeerService {
 
       // 对于文件块数据，限制日志输出以提高性能
       if (message.type === 'file_chunk') {
-        console.log(`发送文件块 ${message.chunkIndex + 1}/${message.totalChunks} 到:`, targetDeviceId);
+        console.log(`发送文件块 ${message.chunkIndex + 1}/${message.totalChunks} 到:`, targetDeviceCode);
       } else {
-        console.log('消息发送:', message.type, '到:', targetDeviceId);
+        console.log('消息发送:', message.type, '到:', targetDeviceCode);
       }
 
       conn.send(message);
@@ -250,14 +248,14 @@ class PeerService {
     let successCount = 0;
     let errorCount = 0;
 
-    this.connections.forEach((conn, deviceId) => {
+    this.connections.forEach((conn, deviceCode) => {
       try {
         conn.send(message);
         successCount++;
-        console.log('广播消息成功:', message, '到:', deviceId);
+        console.log('广播消息成功:', message, '到:', deviceCode);
       } catch (error) {
         errorCount++;
-        console.error('广播消息失败:', error, '到:', deviceId);
+        console.error('广播消息失败:', error, '到:', deviceCode);
       }
     });
 
@@ -276,11 +274,11 @@ class PeerService {
   }
 
   // 断开与指定设备的连接
-  disconnectFromDevice(targetDeviceId) {
-    const conn = this.connections.get(targetDeviceId);
+  disconnectFromDevice(targetDeviceCode) {
+    const conn = this.connections.get(targetDeviceCode);
     if (conn) {
       conn.close();
-      this.connections.delete(targetDeviceId);
+      this.connections.delete(targetDeviceCode);
     }
   }
 
@@ -290,9 +288,9 @@ class PeerService {
     
     // 清理连接
     if (this.connections) {
-      this.connections.forEach((conn, deviceId) => {
+      this.connections.forEach((conn, deviceCode) => {
         try {
-          console.log('关闭连接:', deviceId);
+          console.log('关闭连接:', deviceCode);
           conn.close();
         } catch (error) {
           console.warn('关闭连接失败:', error);
@@ -314,7 +312,7 @@ class PeerService {
     
     // 重置状态
     this.isInitialized = false;
-    this.currentDeviceId = null;
+    this.currentDeviceCode = null;
     
     // 清理处理器
     if (this.connectionHandlers) {
@@ -334,21 +332,21 @@ class PeerService {
   getStatus() {
     return {
       isInitialized: this.isInitialized,
-      currentDeviceId: this.currentDeviceId,
+      currentDeviceCode: this.currentDeviceCode,
       connectedDevices: this.getConnectedDevices(),
       peerId: this.peer?.id || null
     };
   }
 
   // 新增：开始同步到指定设备
-  async startSync(targetDeviceId, progressCallback) {
-    if (!this.connections.has(targetDeviceId)) {
+  async startSync(targetDeviceCode, progressCallback) {
+    if (!this.connections.has(targetDeviceCode)) {
       throw new Error('设备未连接');
     }
 
     try {
       // 发送同步请求
-      this.sendMessage(targetDeviceId, {
+      this.sendMessage(targetDeviceCode, {
         type: 'sync_request',
         timestamp: Date.now()
       });
@@ -357,7 +355,7 @@ class PeerService {
         this.syncProgressHandlers.add(progressCallback);
       }
 
-      console.log('开始同步到设备:', targetDeviceId);
+      console.log('开始同步到设备:', targetDeviceCode);
     } catch (error) {
       console.error('开始同步失败:', error);
       throw error;
@@ -365,26 +363,26 @@ class PeerService {
   }
 
   // 新增：处理同步请求
-  async handleSyncRequest(fromDeviceId) {
-    console.log('收到同步请求，来自:', fromDeviceId);
+  async handleSyncRequest(fromDeviceCode) {
+    console.log('收到同步请求，来自:', fromDeviceCode);
     
     try {
       // 1. 首先发送数据库文件
-      await this.sendDatabaseFile(fromDeviceId);
+      await this.sendDatabaseFile(fromDeviceCode);
       
       // 2. 然后发送所有图片
-      await this.sendAllImages(fromDeviceId);
+      await this.sendAllImages(fromDeviceCode);
       
       // 3. 发送同步完成信号
-      this.sendMessage(fromDeviceId, {
+      this.sendMessage(fromDeviceCode, {
         type: 'sync_complete',
         timestamp: Date.now()
       });
       
-      this.notifyProgress('sync_complete', { deviceId: fromDeviceId });
+      this.notifyProgress('sync_complete', { deviceCode: fromDeviceCode });
     } catch (error) {
       console.error('处理同步请求失败:', error);
-      this.sendMessage(fromDeviceId, {
+      this.sendMessage(fromDeviceCode, {
         type: 'sync_error',
         error: error.message,
         timestamp: Date.now()
@@ -393,10 +391,10 @@ class PeerService {
   }
 
   // 新增：发送数据库文件
-  async sendDatabaseFile(targetDeviceId) {
+  async sendDatabaseFile(targetDeviceCode) {
     try {
       console.log('开始发送数据库文件...');
-      this.notifyProgress('db_start', { deviceId: targetDeviceId });
+      this.notifyProgress('db_start', { deviceCode: targetDeviceCode });
 
       const Module = await loadMyDBModule();
       await ensurePersistentFS(Module);
@@ -412,7 +410,7 @@ class PeerService {
       }
 
       // 发送文件信息
-      this.sendMessage(targetDeviceId, {
+      this.sendMessage(targetDeviceCode, {
         type: 'file_info',
         fileType: 'database',
         fileName: 'test2.db',
@@ -423,11 +421,11 @@ class PeerService {
 
       // 分块发送
       if (dbData.length > 0) {
-        await this.sendFileInChunks(targetDeviceId, dbData, 'database');
+        await this.sendFileInChunks(targetDeviceCode, dbData, 'database');
       }
 
       console.log('数据库文件发送完成');
-      this.notifyProgress('db_complete', { deviceId: targetDeviceId });
+      this.notifyProgress('db_complete', { deviceCode: targetDeviceCode });
     } catch (error) {
       console.error('发送数据库文件失败:', error);
       throw error;
@@ -435,7 +433,7 @@ class PeerService {
   }
 
   // 新增：发送所有图片（直接从 /persistent 目录读取）
-  async sendAllImages(targetDeviceId) {
+  async sendAllImages(targetDeviceCode) {
     try {
       console.log('开始发送图片...');
       
@@ -461,7 +459,7 @@ class PeerService {
       }
 
       this.notifyProgress('images_start', { 
-        deviceId: targetDeviceId, 
+        deviceCode: targetDeviceCode, 
         totalImages: blobFiles.length 
       });
 
@@ -485,10 +483,10 @@ class PeerService {
             type: mimeType
           };
           
-          await this.sendImageDirect(targetDeviceId, fileName, fileData, meta);
+          await this.sendImageDirect(targetDeviceCode, fileName, fileData, meta);
           
           this.notifyProgress('image_progress', {
-            deviceId: targetDeviceId,
+            deviceCode: targetDeviceCode,
             current: i + 1,
             total: blobFiles.length,
             imageId: fileName
@@ -500,7 +498,7 @@ class PeerService {
       }
 
       console.log('所有图片发送完成');
-      this.notifyProgress('images_complete', { deviceId: targetDeviceId });
+      this.notifyProgress('images_complete', { deviceCode: targetDeviceCode });
     } catch (error) {
       console.error('发送图片失败:', error);
       throw error;
@@ -508,10 +506,10 @@ class PeerService {
   }
 
   // 新增：发送单个图片（直接发送文件数据）
-  async sendImageDirect(targetDeviceId, fileName, fileData, meta) {
+  async sendImageDirect(targetDeviceCode, fileName, fileData, meta) {
     try {
       console.log('开始发送图片文件:', {
-        targetDeviceId,
+        targetDeviceCode,
         fileName,
         fileSize: fileData.length,
         meta
@@ -538,10 +536,10 @@ class PeerService {
       console.log('发送图片文件信息:', fileInfo);
 
       // 发送图片信息
-      this.sendMessage(targetDeviceId, fileInfo);
+      this.sendMessage(targetDeviceCode, fileInfo);
 
       // 分块发送
-      await this.sendFileInChunks(targetDeviceId, fileData, 'image', fileName);
+      await this.sendFileInChunks(targetDeviceCode, fileData, 'image', fileName);
     } catch (error) {
       console.error('发送图片失败:', error);
       throw error;
@@ -549,10 +547,10 @@ class PeerService {
   }
 
   // 保留原有方法以兼容其他调用
-  async sendImage(targetDeviceId, imageId, blob, meta) {
+  async sendImage(targetDeviceCode, imageId, blob, meta) {
     try {
       console.log('开始发送图片 (blob模式):', {
-        targetDeviceId,
+        targetDeviceCode,
         imageId,
         blobSize: blob.size,
         blobType: blob.type,
@@ -584,10 +582,10 @@ class PeerService {
       console.log('发送图片文件信息:', fileInfo);
 
       // 发送图片信息
-      this.sendMessage(targetDeviceId, fileInfo);
+      this.sendMessage(targetDeviceCode, fileInfo);
 
       // 分块发送
-      await this.sendFileInChunks(targetDeviceId, uint8Array, 'image', imageId);
+      await this.sendFileInChunks(targetDeviceCode, uint8Array, 'image', imageId);
     } catch (error) {
       console.error('发送图片失败:', error);
       throw error;
@@ -595,7 +593,7 @@ class PeerService {
   }
 
   // 新增：分块发送文件
-  async sendFileInChunks(targetDeviceId, data, fileType, fileId = null) {
+  async sendFileInChunks(targetDeviceCode, data, fileType, fileId = null) {
     const totalChunks = Math.ceil(data.length / this.chunkSize);
     console.log(`开始发送${fileType}文件，总块数: ${totalChunks}`);
     
@@ -609,7 +607,7 @@ class PeerService {
         const base64Data = this.uint8ArrayToBase64(chunk);
         
         // 检查连接状态
-        const conn = this.connections.get(targetDeviceId);
+        const conn = this.connections.get(targetDeviceCode);
         if (!conn || conn.open !== true) {
           throw new Error('连接已断开');
         }
@@ -624,7 +622,7 @@ class PeerService {
           data: base64Data
         };
         
-        this.sendMessage(targetDeviceId, message);
+        this.sendMessage(targetDeviceCode, message);
 
         // 动态调整延迟，前面的块延迟短，后面的块延迟长
         const delay = Math.min(50, 10 + (i * 2));
@@ -651,40 +649,40 @@ class PeerService {
     };
     
     console.log('📤 发送文件完成信号:', completeMessage);
-    this.sendMessage(targetDeviceId, completeMessage);
+    this.sendMessage(targetDeviceCode, completeMessage);
   }
 
   // 新增：处理接收到的消息（扩展原有方法）
-  handleReceivedMessage(data, fromDeviceId) {
+  handleReceivedMessage(data, fromDeviceCode) {
     try {
       console.log('📨 收到消息:', {
         type: data.type,
         fileType: data.fileType,
-        from: fromDeviceId
+        from: fromDeviceCode
       });
       
       switch (data.type) {
         case 'sync_request':
-          this.handleSyncRequest(fromDeviceId);
+          this.handleSyncRequest(fromDeviceCode);
           break;
         case 'file_info':
-          this.handleFileInfo(data, fromDeviceId);
+          this.handleFileInfo(data, fromDeviceCode);
           break;
         case 'file_chunk':
-          this.handleFileChunk(data, fromDeviceId);
+          this.handleFileChunk(data, fromDeviceCode);
           break;
         case 'file_complete':
           console.log('🏁 收到文件完成信号:', {
             fileType: data.fileType,
             fileId: data.fileId
           });
-          this.handleFileComplete(data, fromDeviceId);
+          this.handleFileComplete(data, fromDeviceCode);
           break;
         case 'sync_complete':
-          this.handleSyncComplete(data, fromDeviceId);
+          this.handleSyncComplete(data, fromDeviceCode);
           break;
         case 'sync_error':
-          this.handleSyncError(data, fromDeviceId);
+          this.handleSyncError(data, fromDeviceCode);
           break;
         default:
           console.warn('🤷 未知消息类型:', data.type, '- 只支持文件同步相关消息');
@@ -695,7 +693,7 @@ class PeerService {
   }
 
   // 新增：处理文件信息
-  handleFileInfo(data, fromDeviceId) {
+  handleFileInfo(data, fromDeviceCode) {
     const fileKey = `${data.fileType}_${data.fileId || 'main'}`;
     
     console.log('📋 处理文件信息:', {
@@ -711,7 +709,7 @@ class PeerService {
       info: data,
       chunks: new Array(data.totalChunks),
       receivedChunks: 0,
-      fromDeviceId: fromDeviceId
+      fromDeviceCode: fromDeviceCode
     });
 
     console.log(`✅ 开始接收${data.fileType}文件:`, data.fileName);
@@ -723,7 +721,7 @@ class PeerService {
   }
 
   // 新增：处理文件块
-  handleFileChunk(data, fromDeviceId) {
+  handleFileChunk(data, fromDeviceCode) {
     try {
       const fileKey = `${data.fileType}_${data.fileId || 'main'}`;
       const fileInfo = this.receivingFiles.get(fileKey);
@@ -772,7 +770,7 @@ class PeerService {
   }
 
   // 新增：处理文件完成
-  async handleFileComplete(data, fromDeviceId) {
+  async handleFileComplete(data, fromDeviceCode) {
     const fileKey = `${data.fileType}_${data.fileId || 'main'}`;
     const fileInfo = this.receivingFiles.get(fileKey);
     
@@ -893,17 +891,8 @@ class PeerService {
         fileSize: data.length
       });
       
-      // 简化的刷新确认
-      const shouldRefresh = await this.showSimpleRefreshDialog(hasExistingDB);
-      if (shouldRefresh) {
-        console.log('🔄 刷新页面以应用新数据库...');
-        window.location.reload();
-      } else {
-        console.log('⏰ 用户选择稍后手动刷新页面');
-        this.notifyProgress('db_refresh_deferred', { 
-          message: '数据库已更新，请稍后手动刷新页面以查看新数据' 
-        });
-      }
+      // 不显示确认对话框，直接继续处理
+      console.log('📁 数据库文件已保存，继续处理图片文件...');
       
     } catch (error) {
       console.error('❌ 保存数据库文件失败:', error);
@@ -915,13 +904,6 @@ class PeerService {
     }
   }
 
-  // 新增：简化的刷新确认对话框
-  async showSimpleRefreshDialog(wasOverwritten) {
-    const action = wasOverwritten ? '覆盖' : '创建';
-    const message = `数据库已${action}成功！需要刷新页面以应用更改。`;
-    
-    return window.confirm(`🎉 ${message}\n\n是否现在刷新页面？\n\n点击"确定"立即刷新，点击"取消"稍后手动刷新。`);
-  }
 
   // 新增：保存图片文件（直接写入 /persistent 目录）
   async saveImageFile(info, data) {
@@ -989,19 +971,19 @@ class PeerService {
   }
 
   // 新增：处理同步完成
-  handleSyncComplete(data, fromDeviceId) {
-    console.log('同步完成，来自:', fromDeviceId);
+  handleSyncComplete(data, fromDeviceCode) {
+    console.log('同步完成，来自:', fromDeviceCode);
     this.notifyProgress('sync_complete', {
-      deviceId: fromDeviceId,
+      deviceCode: fromDeviceCode,
       timestamp: data.timestamp
     });
   }
 
   // 新增：处理同步错误
-  handleSyncError(data, fromDeviceId) {
-    console.error('同步错误，来自:', fromDeviceId, data.error);
+  handleSyncError(data, fromDeviceCode) {
+    console.error('同步错误，来自:', fromDeviceCode, data.error);
     this.notifyProgress('sync_error', {
-      deviceId: fromDeviceId,
+      deviceCode: fromDeviceCode,
       error: data.error
     });
   }
@@ -1092,9 +1074,15 @@ class PeerService {
     }
     return uint8Array;
   }
+
 }
 
 // 创建单例实例
 const peerService = new PeerService();
+
+// 暴露到全局用于DeviceService检查在线状态
+if (typeof window !== 'undefined') {
+  window.peerService = peerService;
+}
 
 export default peerService; 

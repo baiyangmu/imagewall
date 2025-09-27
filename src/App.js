@@ -4,9 +4,9 @@ import './App.css';
 import ImageGrid from './ImageGrid';
 import UploadButton from './UploadButton';
 import DeviceSyncButton from './components/DeviceSyncButton';
-import DeviceSyncModal from './components/DeviceSyncModal';
-import DownloadDBButton from './components/DownloadDBButton';
-import DownloadImagesButton from './components/DownloadImagesButton';
+import P2PDemo from './components/P2PDemo';
+// import DownloadDBButton from './components/DownloadDBButton';
+// import DownloadImagesButton from './components/DownloadImagesButton';
 import useDeviceId from './hooks/useDeviceId';
 import DeviceService from './services/DeviceService';
 
@@ -40,13 +40,13 @@ function App() {
       {/* 上传按钮固定在右上角，z-index:500 */}
       <div className="upload-button-wrapper">
         <UploadButton onUploadSuccess={handleUploadSuccess} />
-        <DownloadDBButton />
-        <DownloadImagesButton />
+        {/* <DownloadDBButton /> */}
+        {/* <DownloadImagesButton /> */}
         <DeviceSyncButton onClick={() => setIsSyncOpen(true)} />
       </div>
       {/* ImageGrid 包含模态框，z-index:1000 */}
       <ImageGrid ref={imageGridRef} />
-      <DeviceSyncModal isOpen={isSyncOpen} onRequestClose={() => setIsSyncOpen(false)} />
+      <P2PDemo isModalMode={true} isOpen={isSyncOpen} onRequestClose={() => setIsSyncOpen(false)} />
     </div>
   );
 }

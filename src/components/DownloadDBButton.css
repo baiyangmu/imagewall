@@ -1,0 +1,37 @@
+/* DownloadDBButton.css */
+
+.download-db-container {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.download-db-button {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.3s;
+  padding: 6px 10px;
+  margin: 5px;
+  font-size: 0.8rem;
+}
+
+.download-db-button:hover:not(.disabled) {
+  background-color: #1e7e34;
+}
+
+.download-db-button.disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.download-db-container .error-message {
+  color: red;
+  margin-top: 5px;
+  font-size: 0.8rem;
+  text-align: center;
+  max-width: 150px;
+} 

@@ -1,0 +1,38 @@
+/* DownloadImagesButton.css */
+
+.download-images-container {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.download-images-button {
+  background-color: #ffc107;
+  color: #212529;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.3s;
+  padding: 6px 10px;
+  margin: 5px;
+  font-size: 0.8rem;
+}
+
+.download-images-button:hover:not(.disabled) {
+  background-color: #e0a800;
+}
+
+.download-images-button.disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  color: #666;
+}
+
+.download-images-container .error-message {
+  color: red;
+  margin-top: 5px;
+  font-size: 0.8rem;
+  text-align: center;
+  max-width: 150px;
+} 

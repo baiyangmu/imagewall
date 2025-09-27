@@ -3,12 +3,13 @@ import Modal from 'react-modal';
 import './DeviceSyncModal.css';
 import useDeviceId from '../hooks/useDeviceId';
 import DeviceService from '../services/DeviceService';
+import P2PDemo from './P2PDemo';
 
 Modal.setAppElement('#root');
 
 const DeviceSyncModal = ({ isOpen, onRequestClose }) => {
   const deviceId = useDeviceId();
-  const [mode, setMode] = useState('show'); // 'show' or 'enter'
+  const [mode, setMode] = useState('show'); // 'show', 'enter', or 'p2p'
   const [code, setCode] = useState('');
   const [message, setMessage] = useState('');
 
@@ -46,6 +47,7 @@ const DeviceSyncModal = ({ isOpen, onRequestClose }) => {
           <div className="mode-switch">
             <button onClick={() => setMode('show')} className={mode==='show'?'active':''}>本设备码</button>
             <button onClick={() => setMode('enter')} className={mode==='enter'?'active':''}>输入设备码</button>
+            <button onClick={() => setMode('p2p')} className={mode==='p2p'?'active':''}>P2P通信</button>
           </div>
         </div>
 
@@ -59,12 +61,16 @@ const DeviceSyncModal = ({ isOpen, onRequestClose }) => {
               </div>
               <div className="message">{message}</div>
             </div>
-          ) : (
+          ) : mode === 'enter' ? (
             <div>
               <div>输入6位设备码：</div>
               <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
               <button onClick={handleLookup}>查找并同步</button>
               <div className="message">{message}</div>
+            </div>
+          ) : (
+            <div style={{maxHeight: '500px', overflow: 'auto'}}>
+              <P2PDemo />
             </div>
           )}
         </div>

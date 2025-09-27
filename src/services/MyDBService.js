@@ -271,11 +271,11 @@ export async function getMaxImageId(Module, handle) {
  * 打开数据库文件
  * 在持久化目录中打开指定的数据库文件
  * @param {Object} Module - WebAssembly模块实例
- * @param {string} dbName - 数据库文件名，默认为'test2.db'
+ * @param {string} dbName - 数据库文件名，默认为'imageWall.db'
  * @returns {number} 数据库句柄
  * @throws {Error} 如果打开数据库失败
  */
-export async function openDatabase(Module, dbName = 'test2.db') {
+export async function openDatabase(Module, dbName = 'imageWall.db') {
   try {
     Module.FS.chdir('/persistent');
   } catch(e) {
@@ -385,7 +385,7 @@ export async function initMyDB() {
   
   const Module = await loadMyDBModule();
   await ensurePersistentFS(Module);
-  const handle = await openDatabase(Module, 'test2.db');
+  const handle = await openDatabase(Module, 'imageWall.db');
   
   cached = { Module, handle };
   return cached;
@@ -446,7 +446,7 @@ export default function useMyDB() {
       try {
         const Module = await loadMyDBModule();
         await ensurePersistentFS(Module);
-        const handle = await openDatabase(Module, 'test2.db');
+        const handle = await openDatabase(Module, 'imageWall.db');
         
         if (!mounted) {
           return;

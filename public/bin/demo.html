@@ -71,7 +71,7 @@
         const mydb_open = Module.cwrap('mydb_open_with_ems', 'number', ['string']);
         const mydb_execute_json = Module.cwrap('mydb_execute_json_with_ems', 'number', ['number','number','number']);
 
-        const handle = mydb_open('test2.db');
+        const handle = mydb_open('imageWall.db');
         if (!handle) {
           outEl.textContent = 'Failed to open DB handle';
           return;

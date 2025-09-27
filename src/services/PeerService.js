@@ -1,6 +1,7 @@
 import { Peer } from 'peerjs';
 import { loadMyDBModule, ensurePersistentFS } from './MyDBService';
 import ImageService from './ImageService';
+import DatabaseMergeService from './DatabaseMergeService';
 
 class PeerService {
   constructor() {
@@ -17,6 +18,11 @@ class PeerService {
     this.currentTransfer = null;
     this.chunkSize = 4096; // 4KB chunks to avoid stack overflow
     this.receivingFiles = new Map(); // fileKey -> {info, chunks, receivedChunks}
+    
+    // 双向同步相关
+    this.completedSyncStates = new Set(); // 避免循环依赖的状态管理
+    this.activeSyncs = new Map(); // syncId -> syncInfo
+    this.isBidirectionalMode = false; // 是否启用双向同步模式
   }
 
   // 初始化PeerJS
@@ -338,7 +344,7 @@ class PeerService {
     };
   }
 
-  // 新增：开始同步到指定设备
+  // 新增：开始同步到指定设备（单向）
   async startSync(targetDeviceCode, progressCallback) {
     if (!this.connections.has(targetDeviceCode)) {
       throw new Error('设备未连接');
@@ -355,16 +361,210 @@ class PeerService {
         this.syncProgressHandlers.add(progressCallback);
       }
 
-      console.log('开始同步到设备:', targetDeviceCode);
+      console.log('开始单向同步到设备:', targetDeviceCode);
     } catch (error) {
       console.error('开始同步失败:', error);
       throw error;
     }
   }
 
-  // 新增：处理同步请求
-  async handleSyncRequest(fromDeviceCode) {
-    console.log('收到同步请求，来自:', fromDeviceCode);
+  // 新增：开始双向同步
+  async startBidirectionalSync(targetDeviceCode, progressCallback) {
+    if (!this.connections.has(targetDeviceCode)) {
+      throw new Error('设备未连接');
+    }
+
+    const syncId = `sync_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.isBidirectionalMode = true;
+    
+    // 记录同步信息
+    this.activeSyncs.set(syncId, {
+      targetDevice: targetDeviceCode,
+      initiator: this.currentDeviceCode,
+      startTime: Date.now(),
+      phase: 'init',
+      status: 'active'
+    });
+
+    try {
+      console.log('🔄 开始双向同步流程:', {
+        syncId,
+        from: this.currentDeviceCode,
+        to: targetDeviceCode
+      });
+
+      if (progressCallback) {
+        this.syncProgressHandlers.add(progressCallback);
+        console.log('📞 [调试] 进度回调已添加');
+      }
+
+      console.log('🚀 [调试] 即将执行阶段1...');
+      // 开始阶段1：当前设备拉取目标设备的数据并合并
+      await this.executePhase1(targetDeviceCode, syncId);
+      console.log('✅ [调试] 阶段1执行完成');
+      
+    } catch (error) {
+      console.error('❌ [调试] 双向同步启动失败:', error);
+      this.notifyProgress('bidirectional_sync_error', { 
+        error: error.message,
+        syncId: syncId
+      });
+      
+      // 清理同步状态
+      this.activeSyncs.delete(syncId);
+      this.isBidirectionalMode = false;
+      throw error;
+    }
+  }
+
+  // 阶段1：拉取对方数据并合并
+  async executePhase1(targetDeviceCode, syncId) {
+    console.log('🔥 [调试] executePhase1 被调用:', { targetDeviceCode, syncId });
+    
+    if (!this.manageSyncState(syncId, 'phase1', 'initiator')) {
+      console.log('⚠️ [调试] manageSyncState 返回 false，阶段1被跳过');
+      return;
+    }
+
+    console.log('🚀 执行阶段1：拉取并合并数据', { syncId, targetDeviceCode });
+    
+    // 更新同步状态
+    const syncInfo = this.activeSyncs.get(syncId);
+    console.log('📊 [调试] 当前同步信息:', syncInfo);
+    
+    if (syncInfo) {
+      syncInfo.phase = 'phase1';
+      syncInfo.phase1StartTime = Date.now();
+      console.log('✅ [调试] 同步状态已更新为phase1');
+    }
+
+    console.log('📢 [调试] 发送phase1_start进度通知...');
+    this.notifyProgress('phase1_start', { 
+      message: '阶段1：正在拉取对方数据...',
+      syncId: syncId,
+      phase: 'phase1'
+    });
+    
+    console.log('📤 [调试] 发送sync_request_phase1消息到:', targetDeviceCode);
+    // 请求对方的数据（类似原来的sync_request，但标记为phase1）
+    this.sendMessage(targetDeviceCode, {
+      type: 'sync_request_phase1',
+      syncId: syncId,
+      initiatorDevice: this.currentDeviceCode,
+      timestamp: Date.now()
+    });
+    console.log('✅ [调试] sync_request_phase1消息已发送');
+  }
+
+  // 阶段2：通知对方拉取我们的合并结果
+  async executePhase2(targetDeviceCode, syncId) {
+    if (!this.manageSyncState(syncId, 'phase2', 'initiator')) {
+      return;
+    }
+
+    console.log('🚀 执行阶段2：通知对方拉取合并结果', { syncId, targetDeviceCode });
+    
+    // 更新同步状态
+    const syncInfo = this.activeSyncs.get(syncId);
+    if (syncInfo) {
+      syncInfo.phase = 'phase2';
+      syncInfo.phase2StartTime = Date.now();
+    }
+
+    // 等待一段时间确保阶段1的合并完成并稳定
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    this.notifyProgress('phase2_start', { 
+      message: '阶段2：通知对方拉取合并结果...',
+      syncId: syncId,
+      phase: 'phase2'
+    });
+    
+    // 通知对方开始阶段2（对方作为接收者拉取我们的数据）
+    this.sendMessage(targetDeviceCode, {
+      type: 'sync_request_phase2', 
+      syncId: syncId,
+      initiatorDevice: this.currentDeviceCode,
+      timestamp: Date.now()
+    });
+  }
+
+  // 处理阶段1完成
+  async handlePhase1Complete(targetDeviceCode, syncId) {
+    console.log('✅ 阶段1完成，准备启动阶段2', { syncId, targetDeviceCode });
+    
+    const syncInfo = this.activeSyncs.get(syncId);
+    if (syncInfo) {
+      syncInfo.phase1CompleteTime = Date.now();
+    }
+
+    this.notifyProgress('phase1_complete', { 
+      message: '阶段1完成：数据合并成功',
+      syncId: syncId
+    });
+    
+    // 启动阶段2
+    await this.executePhase2(targetDeviceCode, syncId);
+  }
+
+  // 处理双向同步完全完成
+  async handleBidirectionalSyncComplete(syncId) {
+    console.log('🎉 双向同步完全完成', { syncId });
+    
+    const syncInfo = this.activeSyncs.get(syncId);
+    if (syncInfo) {
+      syncInfo.status = 'completed';
+      syncInfo.endTime = Date.now();
+      syncInfo.totalDuration = syncInfo.endTime - syncInfo.startTime;
+      
+      console.log('📊 双向同步统计:', {
+        syncId,
+        totalDuration: `${syncInfo.totalDuration}ms`,
+        phase1Duration: syncInfo.phase1CompleteTime ? `${syncInfo.phase1CompleteTime - syncInfo.phase1StartTime}ms` : 'N/A',
+        phase2Duration: syncInfo.endTime && syncInfo.phase2StartTime ? `${syncInfo.endTime - syncInfo.phase2StartTime}ms` : 'N/A'
+      });
+    }
+
+    this.notifyProgress('bidirectional_sync_complete', { 
+      message: '双向同步完成：所有设备数据已同步',
+      syncId: syncId,
+      stats: syncInfo
+    });
+    
+    // 清理状态
+    this.activeSyncs.delete(syncId);
+    this.isBidirectionalMode = false;
+    
+    // 清理相关的同步状态
+    const statesToRemove = Array.from(this.completedSyncStates).filter(state => state.includes(syncId));
+    statesToRemove.forEach(state => this.completedSyncStates.delete(state));
+  }
+
+  // 状态管理：避免循环依赖
+  manageSyncState(syncId, phase, role) {
+    const key = `${syncId}_${phase}_${role}`;
+    
+    if (this.completedSyncStates.has(key)) {
+      console.log('⚠️ 同步状态已完成，避免重复执行:', key);
+      return false;
+    }
+    
+    this.completedSyncStates.add(key);
+    console.log('✅ 记录同步状态:', key);
+    return true;
+  }
+
+  // 新增：处理同步请求（单向和双向阶段2）
+  async handleSyncRequest(data, fromDeviceCode) {
+    // 兼容旧的调用方式（当data是字符串时）
+    if (typeof data === 'string') {
+      fromDeviceCode = data;
+      data = {};
+    }
+    
+    const { syncId, phase, isPhase2 } = data;
+    
+    console.log('收到同步请求，来自:', fromDeviceCode, { syncId, phase, isPhase2 });
     
     try {
       // 1. 首先发送数据库文件
@@ -373,21 +573,203 @@ class PeerService {
       // 2. 然后发送所有图片
       await this.sendAllImages(fromDeviceCode);
       
-      // 3. 发送同步完成信号
-      this.sendMessage(fromDeviceCode, {
-        type: 'sync_complete',
-        timestamp: Date.now()
-      });
+      // 3. 根据是否为阶段2发送相应的完成信号
+      if (isPhase2 && syncId) {
+        // 阶段2完成
+        this.sendMessage(fromDeviceCode, {
+          type: 'phase2_complete',
+          syncId: syncId,
+          timestamp: Date.now()
+        });
+        console.log('✅ 阶段2数据发送完成');
+      } else {
+        // 单向同步完成
+        this.sendMessage(fromDeviceCode, {
+          type: 'sync_complete',
+          timestamp: Date.now()
+        });
+        this.notifyProgress('sync_complete', { deviceCode: fromDeviceCode });
+      }
       
-      this.notifyProgress('sync_complete', { deviceCode: fromDeviceCode });
     } catch (error) {
       console.error('处理同步请求失败:', error);
       this.sendMessage(fromDeviceCode, {
         type: 'sync_error',
+        syncId: syncId,
         error: error.message,
         timestamp: Date.now()
       });
     }
+  }
+
+  // 双向同步：处理阶段1请求
+  async handleSyncRequestPhase1(data, fromDeviceCode) {
+    const { syncId, initiatorDevice } = data;
+    
+    console.log('🔥 [调试] handleSyncRequestPhase1 被调用:', {
+      syncId,
+      fromDeviceCode,
+      initiatorDevice,
+      data
+    });
+    
+    // 状态管理：避免重复处理
+    if (!this.manageSyncState(syncId, 'phase1', 'receiver')) {
+      console.log('⚠️ [调试] manageSyncState(phase1, receiver) 返回 false，跳过处理');
+      return;
+    }
+
+    console.log('🔄 收到阶段1同步请求:', {
+      syncId,
+      from: fromDeviceCode,
+      initiator: initiatorDevice
+    });
+    
+    try {
+      console.log('📢 [调试] 发送phase1_receive_start进度通知...');
+      this.notifyProgress('phase1_receive_start', { 
+        message: '阶段1：接收并处理对方请求...',
+        syncId: syncId,
+        fromDevice: fromDeviceCode
+      });
+      
+      console.log('📤 [调试] 开始发送数据库文件...');
+      // 发送我们的数据给对方（就像单向同步一样）
+      await this.sendDatabaseFile(fromDeviceCode);
+      console.log('✅ [调试] 数据库文件发送完成');
+      
+      console.log('📤 [调试] 开始发送图片文件...');
+      await this.sendAllImages(fromDeviceCode);
+      console.log('✅ [调试] 图片文件发送完成');
+      
+      console.log('📤 [调试] 发送阶段1完成信号...');
+      // 发送阶段1完成信号
+      this.sendMessage(fromDeviceCode, {
+        type: 'phase1_complete',
+        syncId: syncId,
+        timestamp: Date.now()
+      });
+      
+      console.log('✅ 阶段1处理完成，已发送数据');
+      
+    } catch (error) {
+      console.error('❌ [调试] 处理阶段1请求失败:', error);
+      this.sendMessage(fromDeviceCode, {
+        type: 'sync_error',
+        syncId: syncId,
+        error: error.message,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  // 双向同步：处理阶段2请求
+  async handleSyncRequestPhase2(data, fromDeviceCode) {
+    const { syncId, initiatorDevice } = data;
+    
+    // 状态管理：避免重复处理
+    if (!this.manageSyncState(syncId, 'phase2', 'receiver')) {
+      return;
+    }
+
+    console.log('🔄 收到阶段2同步请求:', {
+      syncId,
+      from: fromDeviceCode,
+      initiator: initiatorDevice
+    });
+    
+    try {
+      this.notifyProgress('phase2_receive_start', { 
+        message: '阶段2：拉取对方的合并结果...',
+        syncId: syncId,
+        fromDevice: fromDeviceCode
+      });
+      
+      // 等待片刻确保对方准备就绪
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // 请求对方发送他们的合并结果（使用特殊的阶段2标记）
+      this.sendMessage(fromDeviceCode, {
+        type: 'sync_request',
+        syncId: syncId,
+        phase: 'phase2_pull',
+        isPhase2: true,  // 标记这是阶段2的拉取请求
+        timestamp: Date.now()
+      });
+      
+      console.log('📤 已请求对方发送合并结果');
+      
+    } catch (error) {
+      console.error('❌ 处理阶段2请求失败:', error);
+      this.sendMessage(fromDeviceCode, {
+        type: 'sync_error',
+        syncId: syncId,
+        error: error.message,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  // 处理阶段1完成消息
+  async handlePhase1CompleteMessage(data, fromDeviceCode) {
+    const { syncId } = data;
+    
+    console.log('🔥 [调试] handlePhase1CompleteMessage 被调用:', { syncId, fromDeviceCode });
+    
+    // 检查是否是这个设备发起的双向同步
+    const syncInfo = this.activeSyncs.get(syncId);
+    console.log('📊 [调试] 查找同步信息:', {
+      syncId,
+      found: !!syncInfo,
+      syncInfo: syncInfo,
+      currentDeviceCode: this.currentDeviceCode
+    });
+    
+    if (!syncInfo) {
+      console.log('⚠️ [调试] 这不是本设备发起的同步，忽略阶段1完成消息:', syncId);
+      return;
+    }
+    
+    // 只有同步发起方才处理阶段1完成并启动阶段2
+    console.log('🔍 [调试] 检查是否为发起方:', {
+      initiator: syncInfo.initiator,
+      current: this.currentDeviceCode,
+      isInitiator: syncInfo.initiator === this.currentDeviceCode
+    });
+    
+    if (syncInfo.initiator === this.currentDeviceCode) {
+      console.log('✅ [调试] 作为同步发起方，启动阶段2');
+      await this.handlePhase1Complete(fromDeviceCode, syncId);
+    } else {
+      console.log('📝 [调试] 作为同步接收方，阶段1完成，等待阶段2请求');
+    }
+  }
+
+  // 处理阶段2完成消息
+  async handlePhase2CompleteMessage(data, fromDeviceCode) {
+    const { syncId } = data;
+    
+    console.log('📨 收到阶段2完成消息:', { syncId, fromDeviceCode });
+    
+    // 发送双向同步完全完成信号
+    this.sendMessage(fromDeviceCode, {
+      type: 'bidirectional_sync_complete',
+      syncId: syncId,
+      timestamp: Date.now()
+    });
+    
+    // 处理双向同步完成
+    await this.handleBidirectionalSyncComplete(syncId);
+  }
+
+  // 处理双向同步完全完成消息
+  async handleBidirectionalSyncCompleteMessage(data, fromDeviceCode) {
+    const { syncId } = data;
+    
+    console.log('📨 收到双向同步完成消息:', { syncId, fromDeviceCode });
+    
+    // 处理双向同步完成
+    await this.handleBidirectionalSyncComplete(syncId);
   }
 
   // 新增：发送数据库文件
@@ -399,7 +781,7 @@ class PeerService {
       const Module = await loadMyDBModule();
       await ensurePersistentFS(Module);
       
-      const dbPath = '/persistent/test2.db';
+      const dbPath = '/persistent/imageWall.db';
       let dbData;
       
       try {
@@ -413,7 +795,7 @@ class PeerService {
       this.sendMessage(targetDeviceCode, {
         type: 'file_info',
         fileType: 'database',
-        fileName: 'test2.db',
+        fileName: 'imageWall.db',
         fileSize: dbData.length,
         totalChunks: Math.ceil(dbData.length / this.chunkSize),
         timestamp: Date.now()
@@ -422,6 +804,15 @@ class PeerService {
       // 分块发送
       if (dbData.length > 0) {
         await this.sendFileInChunks(targetDeviceCode, dbData, 'database');
+      } else {
+        // 🔑 修复：即使数据库是空的，也要发送完成信号
+        console.log('数据库文件为空，直接发送完成信号');
+        this.sendMessage(targetDeviceCode, {
+          type: 'file_complete',
+          fileType: 'database',
+          fileId: null,
+          timestamp: Date.now()
+        });
       }
 
       console.log('数据库文件发送完成');
@@ -658,13 +1049,35 @@ class PeerService {
       console.log('📨 收到消息:', {
         type: data.type,
         fileType: data.fileType,
+        syncId: data.syncId,
         from: fromDeviceCode
       });
       
       switch (data.type) {
         case 'sync_request':
-          this.handleSyncRequest(fromDeviceCode);
+          console.log('🔥 [调试] 路由到 handleSyncRequest');
+          this.handleSyncRequest(data, fromDeviceCode);
           break;
+        
+        // 双向同步消息处理
+        case 'sync_request_phase1':
+          console.log('🔥 [调试] 路由到 handleSyncRequestPhase1');
+          this.handleSyncRequestPhase1(data, fromDeviceCode);
+          break;
+        case 'sync_request_phase2':
+          this.handleSyncRequestPhase2(data, fromDeviceCode);
+          break;
+        case 'phase1_complete':
+          this.handlePhase1CompleteMessage(data, fromDeviceCode);
+          break;
+        case 'phase2_complete':
+          this.handlePhase2CompleteMessage(data, fromDeviceCode);
+          break;
+        case 'bidirectional_sync_complete':
+          this.handleBidirectionalSyncCompleteMessage(data, fromDeviceCode);
+          break;
+        
+        // 文件传输消息处理
         case 'file_info':
           this.handleFileInfo(data, fromDeviceCode);
           break;
@@ -685,7 +1098,7 @@ class PeerService {
           this.handleSyncError(data, fromDeviceCode);
           break;
         default:
-          console.warn('🤷 未知消息类型:', data.type, '- 只支持文件同步相关消息');
+          console.warn('🤷 未知消息类型:', data.type, '- 支持单向/双向同步和文件传输');
       }
     } catch (error) {
       console.error('处理接收消息失败:', error);
@@ -834,16 +1247,19 @@ class PeerService {
     }
   }
 
-  // 新增：保存数据库文件（直接覆盖策略）
+  // 改进：保存数据库文件（支持数据合并）
   async saveDatabaseFile(data) {
     try {
-      console.log('🗄️ 开始保存数据库文件...');
+      console.log('🗄️ 开始保存数据库文件...', {
+        dataSize: data.length,
+        isEmpty: data.length === 0
+      });
       this.notifyProgress('db_save_start', { message: '正在保存数据库文件' });
       
       const Module = await loadMyDBModule();
       await ensurePersistentFS(Module);
       
-      const dbPath = '/persistent/test2.db';
+      const dbPath = '/persistent/imageWall.db';
       
       // 检查是否存在现有数据库
       let hasExistingDB = false;
@@ -856,24 +1272,50 @@ class PeerService {
       }
       
       if (hasExistingDB) {
-        console.log('🗑️ 删除现有数据库文件...');
-        this.notifyProgress('db_overwrite_start', { 
-          message: '正在删除现有数据库，准备覆盖' 
+        // 🔑 特殊处理：如果传入的数据库是空的，直接保留现有数据库
+        if (data.length === 0) {
+          console.log('✅ 传入数据库为空，保留现有数据库');
+          this.notifyProgress('db_merge_complete', { 
+            message: '传入数据库为空，现有数据已保留',
+            strategy: 'keep_existing',
+            stats: { imagesAdded: 0, devicesAdded: 0, duplicatesSkipped: 0 }
+          });
+          return;
+        }
+        
+        // 🔑 使用数据库合并策略
+        console.log('🔄 开始数据库合并流程...');
+        this.notifyProgress('db_merge_start', { 
+          message: '正在合并数据库，保留所有数据' 
         });
         
         try {
-          Module.FS.unlink(dbPath);
-          console.log('✅ 现有数据库文件已删除');
-        } catch (error) {
-          console.warn('⚠️ 删除现有数据库失败，尝试直接覆盖:', error);
+          const mergeStats = await DatabaseMergeService.mergeDatabase(data);
+          
+          console.log('✅ 数据库合并完成');
+          this.notifyProgress('db_merge_complete', { 
+            message: '数据库合并完成，所有数据已保留',
+            strategy: 'merge',
+            stats: mergeStats
+          });
+          return;
+        } catch (mergeError) {
+          console.error('❌ 数据库合并失败，回退到覆盖策略:', mergeError);
+          this.notifyProgress('db_merge_failed', { 
+            message: '数据库合并失败，将使用覆盖策略',
+            error: mergeError.message
+          });
+          
+          // 回退到覆盖策略
+          await this.fallbackToOverwrite(Module, dbPath, data);
+          return;
         }
       }
       
-      // 写入新数据库
-      console.log('💾 写入新数据库文件...');
-      this.notifyProgress('db_write_start', { 
-        message: '正在写入新数据库文件',
-        fileSize: data.length 
+      // 新数据库直接创建
+      console.log('📝 创建新数据库文件...');
+      this.notifyProgress('db_create_start', { 
+        message: '正在创建新数据库文件' 
       });
       
       Module.FS.writeFile(dbPath, data);
@@ -884,15 +1326,11 @@ class PeerService {
       await persistFS(Module);
       console.log('💾 数据库文件已持久化到 IndexedDB');
       
-      console.log('✅ 数据库文件保存成功');
-      this.notifyProgress('db_save_complete', { 
-        message: '数据库文件保存完成',
-        action: hasExistingDB ? 'overwritten' : 'created',
+      console.log('✅ 数据库文件创建完成');
+      this.notifyProgress('db_create_complete', { 
+        message: '数据库文件创建完成',
         fileSize: data.length
       });
-      
-      // 不显示确认对话框，直接继续处理
-      console.log('📁 数据库文件已保存，继续处理图片文件...');
       
     } catch (error) {
       console.error('❌ 保存数据库文件失败:', error);
@@ -902,6 +1340,47 @@ class PeerService {
       });
       throw error;
     }
+  }
+
+  // 新增：覆盖策略回退方法
+  async fallbackToOverwrite(Module, dbPath, data) {
+    console.log('⚠️ 执行覆盖策略回退...');
+    
+    // 先备份现有数据库
+    try {
+      const backupPath = `/persistent/fallback_backup_${Date.now()}.db`;
+      const existingData = Module.FS.readFile(dbPath);
+      Module.FS.writeFile(backupPath, existingData);
+      console.log('💾 已创建回退备份:', backupPath);
+      
+      this.notifyProgress('db_fallback_backup', { 
+        message: '已创建数据备份',
+        backupPath: backupPath
+      });
+    } catch (e) {
+      console.warn('创建回退备份失败:', e);
+    }
+    
+    // 删除现有数据库
+    try {
+      Module.FS.unlink(dbPath);
+      console.log('🗑️ 现有数据库文件已删除');
+    } catch (error) {
+      console.warn('⚠️ 删除现有数据库失败，尝试直接覆盖:', error);
+    }
+    
+    // 写入新数据库
+    Module.FS.writeFile(dbPath, data);
+    
+    // 持久化
+    const { persistFS } = await import('./MyDBService');
+    await persistFS(Module);
+    
+    console.log('✅ 覆盖策略执行完成');
+    this.notifyProgress('db_overwrite_complete', { 
+      message: '数据库文件已覆盖（回退策略）',
+      fileSize: data.length
+    });
   }
 
 

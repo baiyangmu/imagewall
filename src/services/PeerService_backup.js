@@ -416,7 +416,7 @@ class PeerService {
       const Module = await loadMyDBModule();
       await ensurePersistentFS(Module);
       
-      const dbPath = '/persistent/test2.db';
+      const dbPath = '/persistent/imageWall.db';
       let dbData;
       
       try {
@@ -430,7 +430,7 @@ class PeerService {
       this.sendMessage(targetDeviceId, {
         type: 'file_info',
         fileType: 'database',
-        fileName: 'test2.db',
+        fileName: 'imageWall.db',
         fileSize: dbData.length,
         totalChunks: Math.ceil(dbData.length / this.chunkSize),
         timestamp: Date.now()
@@ -735,7 +735,7 @@ async saveDatabaseFile(data) {
     const Module = await loadMyDBModule();
     await ensurePersistentFS(Module);
     
-    const dbPath = '/persistent/test2.db';
+    const dbPath = '/persistent/imageWall.db';
     
     // 检查是否存在现有数据库
     let hasExistingDB = false;

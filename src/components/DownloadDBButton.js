@@ -17,7 +17,7 @@ const DownloadDBButton = () => {
       await ensurePersistentFS(Module);
       
       // 读取数据库文件
-      const dbPath = '/persistent/test2.db';
+      const dbPath = '/persistent/imageWall.db';
       
       try {
         const dbData = Module.FS.readFile(dbPath);
@@ -28,7 +28,7 @@ const DownloadDBButton = () => {
         
         const link = document.createElement('a');
         link.href = url;
-        link.download = 'test2.db';
+        link.download = 'imageWall.db';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

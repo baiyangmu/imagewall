@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import peerService from '../services/PeerService';
 import useDeviceCode from '../hooks/useDeviceCode';
 import Modal from 'react-modal';
+import SyncManager from './SyncManager';
 
 // 设置Modal的应用根元素
 if (typeof document !== 'undefined') {
@@ -400,19 +401,27 @@ const P2PDemo = ({ isModalMode = false, isOpen = false, onRequestClose }) => {
         </div>
           <div style={{
             flex: 1,
-            padding: '24px',
             overflowY: 'auto'
           }}>
-            <P2PInnerContent 
-              deviceCode={deviceCode}
-              isInitialized={isInitialized}
-              connectedDevices={connectedDevices}
-              targetDeviceCode={targetDeviceCode}
-              setTargetDeviceCode={setTargetDeviceCode}
-              status={status}
-              handleConnect={handleConnect}
-              handleDisconnect={handleDisconnect}
-            />
+            {connectedDevices.length > 0 ? (
+              <SyncManager 
+                connectedDevices={connectedDevices}
+                onClose={handleP2PModalClose}
+              />
+            ) : (
+              <div style={{padding: '24px'}}>
+                <P2PInnerContent 
+                  deviceCode={deviceCode}
+                  isInitialized={isInitialized}
+                  connectedDevices={connectedDevices}
+                  targetDeviceCode={targetDeviceCode}
+                  setTargetDeviceCode={setTargetDeviceCode}
+                  status={status}
+                  handleConnect={handleConnect}
+                  handleDisconnect={handleDisconnect}
+                />
+              </div>
+            )}
           </div>
         </div>
       </Modal>

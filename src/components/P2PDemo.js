@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import peerService from '../services/PeerService';
 import useDeviceId from '../hooks/useDeviceId';
 import SyncManager from './SyncManager';
@@ -8,15 +8,9 @@ const P2PDemo = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [connectedDevices, setConnectedDevices] = useState([]);
   const [targetDeviceId, setTargetDeviceId] = useState('');
-  const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState('未连接');
+  const [statusMessages, setStatusMessages] = useState([]);
   const [showSyncManager, setShowSyncManager] = useState(false);
-  const messagesEndRef = useRef(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -28,38 +22,30 @@ const P2PDemo = () => {
         setIsInitialized(true);
         setStatus('已连接');
         
-        addMessage('系统', `P2P服务已启动，设备ID: ${deviceId}`, 'system');
+        addStatusMessage(`P2P服务已启动，设备ID: ${deviceId}`);
         
         // 更新连接的设备列表
         updateConnectedDevices();
       } catch (error) {
         console.error('初始化P2P失败:', error);
         setStatus(`初始化失败: ${error.message}`);
-        addMessage('系统', `初始化失败: ${error.message}`, 'error');
+        addStatusMessage(`初始化失败: ${error.message}`);
       }
     };
 
     initializePeer();
 
-    // 设置消息处理器
-    const removeMessageHandler = peerService.onMessage((data, fromDeviceId) => {
-      if (data.type === 'chat') {
-        addMessage(fromDeviceId, data.message, 'received');
-      }
-    });
-
     // 设置连接状态处理器
     const removeConnectionHandler = peerService.onConnection((status, deviceId) => {
       if (status === 'connected') {
-        addMessage('系统', `设备 ${deviceId} 已连接`, 'system');
+        addStatusMessage(`设备 ${deviceId} 已连接`);
       } else if (status === 'disconnected') {
-        addMessage('系统', `设备 ${deviceId} 已断开连接`, 'system');
+        addStatusMessage(`设备 ${deviceId} 已断开连接`);
       }
       updateConnectedDevices();
     });
 
     return () => {
-      removeMessageHandler();
       removeConnectionHandler();
       peerService.destroy();
     };
@@ -69,157 +55,49 @@ const P2PDemo = () => {
     setConnectedDevices(peerService.getConnectedDevices());
   };
 
-  const addMessage = (sender, text, type = 'normal') => {
+  const addStatusMessage = (text) => {
     const newMessage = {
       id: Date.now() + Math.random(),
-      sender,
       text,
-      type,
       timestamp: new Date().toLocaleTimeString()
     };
-    setMessages(prev => [...prev, newMessage]);
+    setStatusMessages(prev => [...prev.slice(-4), newMessage]); // 只保留最后5条状态消息
   };
 
   const handleConnect = async () => {
     if (!targetDeviceId.trim()) {
-      addMessage('系统', '请输入目标设备ID', 'error');
+      addStatusMessage('请输入目标设备ID');
       return;
     }
 
     try {
       setStatus('正在连接...');
-      addMessage('系统', `正在连接到设备: ${targetDeviceId}`, 'system');
+      addStatusMessage(`正在连接到设备: ${targetDeviceId}`);
       
       await peerService.connectToDevice(targetDeviceId.trim());
       
       setStatus('已连接');
-      addMessage('系统', `成功连接到设备: ${targetDeviceId}`, 'system');
+      addStatusMessage(`成功连接到设备: ${targetDeviceId}`);
       setTargetDeviceId('');
       updateConnectedDevices();
     } catch (error) {
       console.error('连接失败:', error);
       setStatus('连接失败');
-      addMessage('系统', `连接失败: ${error.message}`, 'error');
-    }
-  };
-
-  const handleSendMessage = () => {
-    if (!message.trim()) {
-      addMessage('系统', '请输入消息内容', 'error');
-      return;
-    }
-
-    if (connectedDevices.length === 0) {
-      addMessage('系统', '没有连接的设备', 'error');
-      return;
-    }
-
-    try {
-      const messageData = {
-        type: 'chat',
-        message: message.trim(),
-        timestamp: Date.now()
-      };
-
-      // 广播消息到所有连接的设备
-      const result = peerService.broadcast(messageData);
-      
-      addMessage('我', message.trim(), 'sent');
-      addMessage('系统', `消息已发送到 ${result.successCount} 个设备`, 'system');
-      
-      if (result.errorCount > 0) {
-        addMessage('系统', `${result.errorCount} 个设备发送失败`, 'error');
-      }
-      
-      setMessage('');
-    } catch (error) {
-      console.error('发送消息失败:', error);
-      addMessage('系统', `发送失败: ${error.message}`, 'error');
-    }
-  };
-
-  const handleSendToSpecific = (targetId) => {
-    if (!message.trim()) {
-      addMessage('系统', '请输入消息内容', 'error');
-      return;
-    }
-
-    try {
-      const messageData = {
-        type: 'chat',
-        message: message.trim(),
-        timestamp: Date.now()
-      };
-
-      peerService.sendMessage(targetId, messageData);
-      addMessage('我', `→ ${targetId}: ${message.trim()}`, 'sent');
-      setMessage('');
-    } catch (error) {
-      console.error('发送消息失败:', error);
-      addMessage('系统', `发送到 ${targetId} 失败: ${error.message}`, 'error');
+      addStatusMessage(`连接失败: ${error.message}`);
     }
   };
 
   const handleDisconnect = (targetId) => {
     peerService.disconnectFromDevice(targetId);
-    addMessage('系统', `已断开与设备 ${targetId} 的连接`, 'system');
+    addStatusMessage(`已断开与设备 ${targetId} 的连接`);
     updateConnectedDevices();
   };
 
-  const getMessageStyle = (type) => {
-    const baseStyle = {
-      margin: '8px 0',
-      padding: '8px 12px',
-      borderRadius: '8px',
-      maxWidth: '80%',
-      wordWrap: 'break-word'
-    };
-
-    switch (type) {
-      case 'sent':
-        return {
-          ...baseStyle,
-          backgroundColor: '#007bff',
-          color: 'white',
-          marginLeft: 'auto',
-          textAlign: 'right'
-        };
-      case 'received':
-        return {
-          ...baseStyle,
-          backgroundColor: '#e9ecef',
-          color: '#333'
-        };
-      case 'system':
-        return {
-          ...baseStyle,
-          backgroundColor: '#fff3cd',
-          color: '#856404',
-          fontStyle: 'italic',
-          fontSize: '14px',
-          margin: '4px auto',
-          textAlign: 'center',
-          maxWidth: '90%'
-        };
-      case 'error':
-        return {
-          ...baseStyle,
-          backgroundColor: '#f8d7da',
-          color: '#721c24',
-          fontStyle: 'italic',
-          fontSize: '14px',
-          margin: '4px auto',
-          textAlign: 'center',
-          maxWidth: '90%'
-        };
-      default:
-        return baseStyle;
-    }
-  };
-
+  // 简化的样式
   const containerStyle = {
-    maxWidth: '900px',
-    margin: '20px auto',
+    maxWidth: '1200px',
+    width: '95%',
+    margin: '10px auto',
     padding: '30px',
     border: '1px solid #ddd',
     borderRadius: '8px',
@@ -227,27 +105,36 @@ const P2PDemo = () => {
   };
 
   const headerStyle = {
-    marginBottom: '25px',
+    marginBottom: '20px',
     padding: '15px',
-    backgroundColor: '#007bff',
+    backgroundColor: '#17a2b8',
     color: 'white',
-    borderRadius: '4px',
+    borderRadius: '6px',
     textAlign: 'center'
+  };
+
+  const sectionStyle = {
+    marginBottom: '20px',
+    padding: '15px',
+    backgroundColor: 'white',
+    borderRadius: '6px',
+    border: '1px solid #e9ecef'
   };
 
   const inputGroupStyle = {
     display: 'flex',
-    gap: '12px',
+    gap: '15px',
     marginBottom: '15px',
     alignItems: 'center'
   };
 
   const inputStyle = {
     flex: 1,
-    padding: '12px',
+    padding: '12px 16px',
     border: '1px solid #ccc',
-    borderRadius: '4px',
-    fontSize: '16px'
+    borderRadius: '6px',
+    fontSize: '16px',
+    minWidth: '200px'
   };
 
   const buttonStyle = {
@@ -255,148 +142,131 @@ const P2PDemo = () => {
     backgroundColor: '#007bff',
     color: 'white',
     border: 'none',
-    borderRadius: '4px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '16px'
-  };
-
-  const messagesStyle = {
-    height: '450px',
-    overflowY: 'auto',
-    border: '1px solid #ccc',
-    borderRadius: '4px',
-    padding: '15px',
-    backgroundColor: 'white',
-    marginBottom: '15px'
+    fontSize: '14px',
+    fontWeight: '500',
+    whiteSpace: 'nowrap'
   };
 
   const deviceListStyle = {
-    margin: '15px 0',
     padding: '15px',
-    backgroundColor: '#e9ecef',
-    borderRadius: '4px'
+    backgroundColor: '#f8f9fa',
+    borderRadius: '6px',
+    border: '1px solid #e9ecef'
   };
 
-  const deviceItemStyle = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '8px 0',
-    borderBottom: '1px solid #ccc'
+  const statusMessagesStyle = {
+    maxHeight: '180px',
+    overflowY: 'auto',
+    padding: '15px',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '6px',
+    fontSize: '14px',
+    border: '1px solid #e9ecef',
+    lineHeight: '1.4'
   };
 
   return (
     <div style={containerStyle}>
+      {/* 标题和状态 */}
       <div style={headerStyle}>
-        <h3>P2P 通信演示</h3>
+        <h3>📱 设备同步管理</h3>
         <div>当前设备ID: {deviceId || '加载中...'}</div>
-        <div>状态: {status}</div>
+        <div>连接状态: {status}</div>
       </div>
 
       {/* 连接设备 */}
-      <div style={inputGroupStyle}>
-        <input
-          type="text"
-          placeholder="输入目标设备ID"
-          value={targetDeviceId}
-          onChange={(e) => setTargetDeviceId(e.target.value)}
-          style={inputStyle}
-          onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
-        />
-        <button onClick={handleConnect} style={buttonStyle} disabled={!isInitialized}>
-          连接设备
-        </button>
+      <div style={sectionStyle}>
+        <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>🔗 连接新设备</h4>
+        <div style={inputGroupStyle}>
+          <input
+            type="text"
+            placeholder="输入目标设备ID"
+            value={targetDeviceId}
+            onChange={(e) => setTargetDeviceId(e.target.value)}
+            style={inputStyle}
+            onKeyPress={(e) => e.key === 'Enter' && handleConnect()}
+          />
+          <button onClick={handleConnect} style={buttonStyle} disabled={!isInitialized}>
+            连接设备
+          </button>
+        </div>
       </div>
 
       {/* 已连接的设备 */}
       {connectedDevices.length > 0 && (
-        <div style={deviceListStyle}>
-          <strong>已连接的设备 ({connectedDevices.length}):</strong>
-          {connectedDevices.map(deviceId => (
-            <div key={deviceId} style={deviceItemStyle}>
-              <span>{deviceId}</span>
-              <button 
-                onClick={() => handleDisconnect(deviceId)}
-                style={{...buttonStyle, backgroundColor: '#dc3545', fontSize: '12px', padding: '4px 8px'}}
-              >
-                断开
-              </button>
-            </div>
-          ))}
+        <div style={sectionStyle}>
+          <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>
+            📡 已连接设备 ({connectedDevices.length})
+          </h4>
+          <div style={deviceListStyle}>
+            {connectedDevices.map((deviceId, index) => (
+              <div key={deviceId} style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 0',
+                borderBottom: index < connectedDevices.length - 1 ? '1px solid #e9ecef' : 'none'
+              }}>
+                <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+                  <span style={{fontFamily: 'monospace', fontSize: '15px', fontWeight: '500'}}>{deviceId}</span>
+                  <span style={{fontSize: '12px', color: '#666'}}>设备 {index + 1}</span>
+                </div>
+                <button 
+                  onClick={() => handleDisconnect(deviceId)}
+                  style={{...buttonStyle, backgroundColor: '#dc3545', fontSize: '12px', padding: '8px 12px'}}
+                >
+                  断开连接
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* 消息显示区域 */}
-      <div style={messagesStyle}>
-        {messages.map(msg => (
-          <div key={msg.id} style={getMessageStyle(msg.type)}>
-            <div>
-              {msg.type === 'sent' || msg.type === 'received' ? (
-                <>
-                  <strong>{msg.sender}</strong> ({msg.timestamp})
-                  <br />
-                  {msg.text}
-                </>
-              ) : (
-                msg.text
-              )}
-            </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* 发送消息 */}
-      <div style={inputGroupStyle}>
-        <input
-          type="text"
-          placeholder="输入消息..."
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          style={inputStyle}
-          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-        />
-        <button 
-          onClick={handleSendMessage} 
-          style={buttonStyle} 
-          disabled={!isInitialized || connectedDevices.length === 0}
-        >
-          广播
-        </button>
-      </div>
-
-      {/* 发送给特定设备 */}
-      {connectedDevices.length > 0 && (
-        <div style={{marginTop: '10px'}}>
-          <strong>发送给特定设备:</strong>
-          <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px'}}>
-            {connectedDevices.map(deviceId => (
-              <button
-                key={deviceId}
-                onClick={() => handleSendToSpecific(deviceId)}
-                style={{...buttonStyle, backgroundColor: '#28a745', fontSize: '12px', padding: '4px 8px'}}
-                disabled={!message.trim()}
-              >
-                → {deviceId.slice(0, 8)}...
-              </button>
+      {/* 状态消息 */}
+      {statusMessages.length > 0 && (
+        <div style={sectionStyle}>
+          <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>📝 状态消息</h4>
+          <div style={statusMessagesStyle}>
+            {statusMessages.map((msg, index) => (
+              <div key={msg.id} style={{
+                marginBottom: index < statusMessages.length - 1 ? '10px' : '0',
+                fontSize: '13px',
+                padding: '8px 12px',
+                backgroundColor: 'white',
+                borderRadius: '4px',
+                border: '1px solid #e9ecef'
+              }}>
+                <span style={{color: '#17a2b8', fontWeight: '500'}}>[{msg.timestamp}]</span> 
+                <span style={{marginLeft: '8px'}}>{msg.text}</span>
+              </div>
             ))}
           </div>
         </div>
       )}
 
       {/* 图库同步功能 */}
-      {connectedDevices.length > 0 && (
-        <div style={{marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #e9ecef'}}>
-          <strong style={{display: 'block', marginBottom: '10px', color: '#333'}}>📁 图库同步功能:</strong>
-          <div style={{marginBottom: '10px', fontSize: '14px', color: '#666'}}>
-            将本设备的数据库(test2.db)和所有图片同步到其他设备
+      {connectedDevices.length > 0 ? (
+        <div style={sectionStyle}>
+          <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>📁 图库同步</h4>
+          <div style={{marginBottom: '15px', fontSize: '14px', color: '#666'}}>
+            将本设备的数据库(test2.db)和所有图片文件同步到已连接的设备
           </div>
           <button 
             onClick={() => setShowSyncManager(true)}
-            style={{...buttonStyle, backgroundColor: '#17a2b8', padding: '10px 20px'}}
+            style={{...buttonStyle, backgroundColor: '#28a745', padding: '12px 24px', fontSize: '16px'}}
           >
             🔄 开始图库同步
           </button>
+        </div>
+      ) : (
+        <div style={sectionStyle}>
+          <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>📁 图库同步</h4>
+          <div style={{fontSize: '14px', color: '#999', fontStyle: 'italic'}}>
+            请先连接至少一个设备才能开始同步
+          </div>
         </div>
       )}
 
@@ -408,18 +278,16 @@ const P2PDemo = () => {
         />
       )}
 
-      <div style={{marginTop: '20px', fontSize: '14px', color: '#666'}}>
-        <strong>局域网P2P连接说明:</strong>
-        <ul style={{margin: '8px 0', paddingLeft: '20px'}}>
-          <li>✅ 在同一局域网的其他设备上打开此页面</li>
-          <li>📋 复制该设备的设备ID，发送给目标设备</li>
-          <li>🔗 在目标设备输入设备ID，点击"连接设备"</li>
-          <li>💬 连接成功后，消息将直接在局域网内传输</li>
-          <li>🚀 局域网连接速度快，延迟低，无需担心外网流量</li>
+      {/* 使用说明 */}
+      <div style={{...sectionStyle, backgroundColor: '#f8f9fa'}}>
+        <h4 style={{marginTop: 0, marginBottom: '15px', color: '#333'}}>📖 使用说明</h4>
+        <ul style={{margin: '0', paddingLeft: '20px', fontSize: '14px', color: '#666', lineHeight: '1.6'}}>
+          <li>确保所有设备连接在同一WiFi网络下</li>
+          <li>在目标设备上打开此页面，获取设备ID</li>
+          <li>在此设备输入目标设备ID并点击"连接设备"</li>
+          <li>连接成功后，可以开始图库同步</li>
+          <li>同步将传输数据库文件和所有图片到目标设备</li>
         </ul>
-        <div style={{marginTop: '10px', padding: '8px', backgroundColor: '#e7f3ff', borderRadius: '4px', fontSize: '13px'}}>
-          <strong>💡 提示:</strong> 此应用针对局域网优化，确保所有设备连接在同一WiFi网络下效果最佳。
-        </div>
       </div>
     </div>
   );

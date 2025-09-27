@@ -7,7 +7,6 @@ class PeerService {
     this.peer = null;
     this.connections = new Map(); // target_device_id -> connection
     this.isInitialized = false;
-    this.messageHandlers = new Set();
     this.connectionHandlers = new Set();
     this.currentDeviceId = null;
     
@@ -170,16 +169,11 @@ class PeerService {
           console.log('成功连接到设备:', targetDeviceId);
           this.connections.set(targetDeviceId, conn);
           
-          // 设置消息处理
+          // 设置消息处理 - 统一路由到 handleReceivedMessage
           conn.on('data', (data) => {
             console.log('收到消息:', data, '来自:', targetDeviceId);
-            this.messageHandlers.forEach(handler => {
-              try {
-                handler(data, targetDeviceId);
-              } catch (e) {
-                console.error('消息处理器错误:', e);
-              }
-            });
+            // 统一使用 handleReceivedMessage 处理所有消息
+            this.handleReceivedMessage(data, targetDeviceId);
           });
 
           conn.on('close', () => {
@@ -270,12 +264,6 @@ class PeerService {
     return { successCount, errorCount };
   }
 
-  // 添加消息处理器
-  onMessage(handler) {
-    this.messageHandlers.add(handler);
-    return () => this.messageHandlers.delete(handler);
-  }
-
   // 添加连接状态处理器
   onConnection(handler) {
     this.connectionHandlers.add(handler);
@@ -329,9 +317,6 @@ class PeerService {
     this.currentDeviceId = null;
     
     // 清理处理器
-    if (this.messageHandlers) {
-      this.messageHandlers.clear();
-    }
     if (this.connectionHandlers) {
       this.connectionHandlers.clear();
     }
@@ -449,41 +434,68 @@ class PeerService {
     }
   }
 
-  // 新增：发送所有图片
+  // 新增：发送所有图片（直接从 /persistent 目录读取）
   async sendAllImages(targetDeviceId) {
     try {
       console.log('开始发送图片...');
       
-      // 获取所有图片ID
-      const allImageIds = await ImageService.getAllImageIds();
-      if (!allImageIds || allImageIds.length === 0) {
+      const Module = await loadMyDBModule();
+      await ensurePersistentFS(Module);
+      
+      // 获取 /persistent/blobs 目录下的所有文件
+      const blobsPath = '/persistent/blobs';
+      let blobFiles = [];
+      
+      try {
+        const files = Module.FS.readdir(blobsPath);
+        blobFiles = files.filter(file => file !== '.' && file !== '..' && !file.startsWith('.'));
+        console.log('找到blob文件:', blobFiles);
+      } catch (error) {
+        console.log('没有找到blobs目录或文件:', error);
+        return;
+      }
+
+      if (blobFiles.length === 0) {
         console.log('没有图片需要发送');
         return;
       }
 
       this.notifyProgress('images_start', { 
         deviceId: targetDeviceId, 
-        totalImages: allImageIds.length 
+        totalImages: blobFiles.length 
       });
 
-      // 逐个发送图片
-      for (let i = 0; i < allImageIds.length; i++) {
-        const imageData = allImageIds[i];
+      // 逐个发送图片文件
+      for (let i = 0; i < blobFiles.length; i++) {
+        const fileName = blobFiles[i];
         
         try {
-          const result = await ImageService.getImage(imageData.id);
-          if (result && result.blob && result.meta) {
-            await this.sendImage(targetDeviceId, imageData.id, result.blob, result.meta);
-            
-            this.notifyProgress('image_progress', {
-              deviceId: targetDeviceId,
-              current: i + 1,
-              total: allImageIds.length,
-              imageId: imageData.id
-            });
-          }
+          const filePath = `${blobsPath}/${fileName}`;
+          const fileData = Module.FS.readFile(filePath);
+          
+          // 尝试从文件名推断MIME类型
+          const mimeType = this.getMimeTypeFromFileName(fileName);
+          
+          // 创建文件元数据
+          const meta = {
+            hash: fileName,
+            filename: fileName,
+            uploadDate: new Date().toISOString(),
+            size: fileData.length,
+            type: mimeType
+          };
+          
+          await this.sendImageDirect(targetDeviceId, fileName, fileData, meta);
+          
+          this.notifyProgress('image_progress', {
+            deviceId: targetDeviceId,
+            current: i + 1,
+            total: blobFiles.length,
+            imageId: fileName
+          });
+          
         } catch (imgError) {
-          console.warn(`发送图片 ${imageData.id} 失败:`, imgError);
+          console.warn(`发送图片文件 ${fileName} 失败:`, imgError);
         }
       }
 
@@ -495,10 +507,51 @@ class PeerService {
     }
   }
 
-  // 新增：发送单个图片
+  // 新增：发送单个图片（直接发送文件数据）
+  async sendImageDirect(targetDeviceId, fileName, fileData, meta) {
+    try {
+      console.log('开始发送图片文件:', {
+        targetDeviceId,
+        fileName,
+        fileSize: fileData.length,
+        meta
+      });
+
+      // 清理meta对象，只保留必要的字段，避免循环引用
+      const cleanMeta = this.cleanMetaObject(meta);
+      
+      console.log('清理后的meta:', cleanMeta);
+
+      const fileInfo = {
+        type: 'file_info',
+        fileType: 'image',
+        fileId: fileName,  // 使用文件名作为ID
+        imageId: fileName, // 保留imageId用于图片标识
+        fileName: fileName,
+        fileSize: fileData.length,
+        totalChunks: Math.ceil(fileData.length / this.chunkSize),
+        mimeType: cleanMeta.type || 'image/jpeg',
+        meta: cleanMeta,
+        timestamp: Date.now()
+      };
+      
+      console.log('发送图片文件信息:', fileInfo);
+
+      // 发送图片信息
+      this.sendMessage(targetDeviceId, fileInfo);
+
+      // 分块发送
+      await this.sendFileInChunks(targetDeviceId, fileData, 'image', fileName);
+    } catch (error) {
+      console.error('发送图片失败:', error);
+      throw error;
+    }
+  }
+
+  // 保留原有方法以兼容其他调用
   async sendImage(targetDeviceId, imageId, blob, meta) {
     try {
-      console.log('开始发送图片:', {
+      console.log('开始发送图片 (blob模式):', {
         targetDeviceId,
         imageId,
         blobSize: blob.size,
@@ -590,17 +643,26 @@ class PeerService {
     console.log(`${fileType}文件发送完成，发送了${totalChunks}块`);
     
     // 发送文件完成信号
-    this.sendMessage(targetDeviceId, {
+    const completeMessage = {
       type: 'file_complete',
       fileType: fileType,
       fileId: fileId,
       timestamp: Date.now()
-    });
+    };
+    
+    console.log('📤 发送文件完成信号:', completeMessage);
+    this.sendMessage(targetDeviceId, completeMessage);
   }
 
   // 新增：处理接收到的消息（扩展原有方法）
   handleReceivedMessage(data, fromDeviceId) {
     try {
+      console.log('📨 收到消息:', {
+        type: data.type,
+        fileType: data.fileType,
+        from: fromDeviceId
+      });
+      
       switch (data.type) {
         case 'sync_request':
           this.handleSyncRequest(fromDeviceId);
@@ -612,6 +674,10 @@ class PeerService {
           this.handleFileChunk(data, fromDeviceId);
           break;
         case 'file_complete':
+          console.log('🏁 收到文件完成信号:', {
+            fileType: data.fileType,
+            fileId: data.fileId
+          });
           this.handleFileComplete(data, fromDeviceId);
           break;
         case 'sync_complete':
@@ -620,16 +686,8 @@ class PeerService {
         case 'sync_error':
           this.handleSyncError(data, fromDeviceId);
           break;
-        case 'chat':
-          // 保持原有的聊天功能
-          this.messageHandlers.forEach(handler => {
-            try {
-              handler(data, fromDeviceId);
-            } catch (e) {
-              console.error('消息处理器错误:', e);
-            }
-          });
-          break;
+        default:
+          console.warn('🤷 未知消息类型:', data.type, '- 只支持文件同步相关消息');
       }
     } catch (error) {
       console.error('处理接收消息失败:', error);
@@ -640,6 +698,15 @@ class PeerService {
   handleFileInfo(data, fromDeviceId) {
     const fileKey = `${data.fileType}_${data.fileId || 'main'}`;
     
+    console.log('📋 处理文件信息:', {
+      fileType: data.fileType,
+      fileId: data.fileId,
+      fileName: data.fileName,
+      fileKey: fileKey,
+      totalChunks: data.totalChunks,
+      fileSize: data.fileSize
+    });
+    
     this.receivingFiles.set(fileKey, {
       info: data,
       chunks: new Array(data.totalChunks),
@@ -647,7 +714,7 @@ class PeerService {
       fromDeviceId: fromDeviceId
     });
 
-    console.log(`开始接收${data.fileType}文件:`, data.fileName);
+    console.log(`✅ 开始接收${data.fileType}文件:`, data.fileName);
     this.notifyProgress('receive_start', {
       fileType: data.fileType,
       fileName: data.fileName,
@@ -739,11 +806,21 @@ class PeerService {
       });
 
       // 根据文件类型处理
+      console.log('🔍 文件类型判断:', {
+        fileType: data.fileType,
+        isDatabase: data.fileType === 'database',
+        isImage: data.fileType === 'image'
+      });
+      
       if (data.fileType === 'database') {
+        console.log('📦 处理数据库文件...');
         await this.saveDatabaseFile(completeFile);
       } else if (data.fileType === 'image') {
-        console.log('准备保存图片，fileInfo.info:', fileInfo.info);
+        console.log('🖼️ 准备保存图片，fileInfo.info:', fileInfo.info);
+        console.log('🖼️ 图片数据大小:', completeFile.length);
         await this.saveImageFile(fileInfo.info, completeFile);
+      } else {
+        console.warn('⚠️ 未知文件类型:', data.fileType);
       }
 
       // 清理接收状态
@@ -803,6 +880,12 @@ class PeerService {
       
       Module.FS.writeFile(dbPath, data);
       
+      // 🔑 关键修复：持久化数据库文件到 IndexedDB
+      console.log('🔄 开始持久化数据库文件到 IndexedDB...');
+      const { persistFS } = await import('./MyDBService');
+      await persistFS(Module);
+      console.log('💾 数据库文件已持久化到 IndexedDB');
+      
       console.log('✅ 数据库文件保存成功');
       this.notifyProgress('db_save_complete', { 
         message: '数据库文件保存完成',
@@ -840,40 +923,67 @@ class PeerService {
     return window.confirm(`🎉 ${message}\n\n是否现在刷新页面？\n\n点击"确定"立即刷新，点击"取消"稍后手动刷新。`);
   }
 
-  // 新增：保存图片文件
+  // 新增：保存图片文件（直接写入 /persistent 目录）
   async saveImageFile(info, data) {
+    console.log('🚀 saveImageFile 方法被调用!'); // 立即输出，确保方法被调用
+    console.log('🖼️ 开始保存图片文件到 /persistent 目录:', info);
+    console.log('📊 数据信息:', {
+      dataLength: data?.length,
+      dataType: typeof data,
+      infoKeys: info ? Object.keys(info) : 'null'
+    });
+    
     try {
-      console.log('开始保存图片文件:', info);
-      
-      // 创建Blob对象
-      const blob = new Blob([data], { type: info.mimeType });
-      
-      // 将Blob转换为File对象，以便使用uploadImages方法
-      const fileName = info.fileName || `image_${info.imageId || Date.now()}.${this.getFileExtension(info.mimeType)}`;
-      const file = new File([blob], fileName, { 
-        type: info.mimeType,
-        lastModified: Date.now()
+      this.notifyProgress('image_save_start', { 
+        fileName: info.fileName,
+        fileSize: data.length 
       });
       
-      console.log('创建File对象:', {
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        imageId: info.imageId
-      });
+      const Module = await loadMyDBModule();
+      await ensurePersistentFS(Module);
       
-      // 使用uploadImages方法保存图片
-      const result = await ImageService.uploadImages([file]);
-      
-      if (result && result.uploaded_ids && result.uploaded_ids.length > 0) {
-        console.log('图片保存成功, ID:', result.uploaded_ids[0]);
-      } else {
-        console.warn('图片保存失败，没有返回ID');
+      // 确保 /persistent/blobs 目录存在
+      const blobsPath = '/persistent/blobs';
+      try {
+        Module.FS.stat(blobsPath);
+      } catch (e) {
+        console.log('📁 创建 blobs 目录...');
+        Module.FS.mkdir(blobsPath);
       }
       
-      console.log('图片已保存:', fileName);
+      // 使用传输的文件名，或者生成一个新的文件名
+      const fileName = info.fileName || `${info.imageId || Date.now()}.${this.getFileExtension(info.mimeType)}`;
+      const filePath = `${blobsPath}/${fileName}`;
+      
+      console.log('💾 写入图片文件:', {
+        fileName,
+        filePath,
+        fileSize: data.length,
+        mimeType: info.mimeType
+      });
+      
+      // 直接写入文件到 /persistent/blobs 目录
+      Module.FS.writeFile(filePath, data);
+      
+      // 🔑 关键修复：持久化图片文件到 IndexedDB
+      console.log('🔄 开始持久化图片文件到 IndexedDB...');
+      const { persistFS } = await import('./MyDBService');
+      await persistFS(Module);
+      console.log('💾 图片文件已持久化到 IndexedDB');
+      
+      console.log('✅ 图片文件保存成功:', fileName);
+      this.notifyProgress('image_save_complete', { 
+        fileName: fileName,
+        filePath: filePath,
+        fileSize: data.length
+      });
+      
     } catch (error) {
-      console.error('保存图片失败:', error);
+      console.error('❌ 保存图片文件失败:', error);
+      this.notifyProgress('image_save_error', { 
+        fileName: info.fileName,
+        error: error.message 
+      });
       throw error;
     }
   }
@@ -922,6 +1032,19 @@ class PeerService {
       'image/webp': 'webp'
     };
     return extensions[mimeType] || 'jpg';
+  }
+
+  // 新增：从文件名推断MIME类型
+  getMimeTypeFromFileName(fileName) {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    const mimeTypes = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp'
+    };
+    return mimeTypes[extension] || 'image/jpeg';
   }
 
   // 新增：清理meta对象，避免循环引用

@@ -6,7 +6,7 @@ WORKDIR /app
 
 # 复制 package.json 和 package-lock.json 文件
 COPY package.json package-lock.json ./
-COPY .env ./
+# COPY .env ./  # 如果没有.env文件，注释掉这行
 
 # 安装依赖
 RUN npm install
@@ -25,8 +25,8 @@ FROM nginx:alpine
 # 复制前端构建产物到 nginx 的默认静态文件目录
 COPY --from=build /app/build /usr/share/nginx/html
 
-# 配置 Nginx
-COPY nginx.conf /etc/nginx/nginx.conf
+# 配置 Nginx - 修正路径
+COPY ../nginx.conf /etc/nginx/nginx.conf
 
 # 暴露端口
 EXPOSE 80

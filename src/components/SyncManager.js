@@ -6,7 +6,7 @@ const SyncManager = ({ connectedDevices, onClose }) => {
   const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, completed, error
   const [syncProgress, setSyncProgress] = useState({});
   const [logs, setLogs] = useState([]);
-  const [syncMode, setSyncMode] = useState('unidirectional'); // unidirectional, bidirectional
+  // 移除 syncMode 状态，因为现在用两个独立按钮
   
   // 自动使用第一个连接的设备
   const targetDevice = connectedDevices && connectedDevices.length > 0 ? connectedDevices[0] : null;
@@ -97,6 +97,20 @@ const SyncManager = ({ connectedDevices, onClose }) => {
             syncId: progress.data.syncId
           });
           break;
+        case 'db_phase2_overwrite_start':
+          setSyncProgress({ 
+            phase: '阶段2：接收对方合并结果', 
+            progress: 80,
+            syncId: progress.data.syncId
+          });
+          break;
+        case 'db_phase2_overwrite_complete':
+          setSyncProgress({ 
+            phase: '阶段2：合并结果已应用', 
+            progress: 90,
+            syncId: progress.data.syncId
+          });
+          break;
         case 'bidirectional_sync_complete':
           setSyncStatus('completed');
           setSyncProgress({ 
@@ -174,7 +188,8 @@ const SyncManager = ({ connectedDevices, onClose }) => {
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
   };
 
-  const handleStartSync = async () => {
+  // 单向同步处理函数
+  const handleStartUnidirectionalSync = async () => {
     if (!targetDevice) {
       console.error('没有可用的目标设备');
       setSyncStatus('error');
@@ -185,19 +200,33 @@ const SyncManager = ({ connectedDevices, onClose }) => {
     try {
       setSyncStatus('syncing');
       setLogs([]);
-      
-      if (syncMode === 'bidirectional') {
-        addLog(`开始双向同步到设备: ${targetDevice}`);
-        await peerService.startBidirectionalSync(targetDevice);
-      } else {
-        addLog(`开始单向同步到设备: ${targetDevice}`);
-        await peerService.startSync(targetDevice);
-      }
-      
+      addLog(`开始单向同步到设备: ${targetDevice}`);
+      await peerService.startSync(targetDevice);
     } catch (error) {
-      console.error('开始同步失败:', error);
+      console.error('开始单向同步失败:', error);
       setSyncStatus('error');
-      addLog(`同步失败: ${error.message}`);
+      addLog(`单向同步失败: ${error.message}`);
+    }
+  };
+
+  // 双向同步处理函数
+  const handleStartBidirectionalSync = async () => {
+    if (!targetDevice) {
+      console.error('没有可用的目标设备');
+      setSyncStatus('error');
+      addLog('同步失败: 没有可用的目标设备');
+      return;
+    }
+
+    try {
+      setSyncStatus('syncing');
+      setLogs([]);
+      addLog(`开始双向同步到设备: ${targetDevice}`);
+      await peerService.startBidirectionalSync(targetDevice);
+    } catch (error) {
+      console.error('开始双向同步失败:', error);
+      setSyncStatus('error');
+      addLog(`双向同步失败: ${error.message}`);
     }
   };
 
@@ -219,50 +248,26 @@ const SyncManager = ({ connectedDevices, onClose }) => {
           <div style={{marginBottom: '15px', fontSize: '14px', color: '#666'}}>
             同步目标设备: <strong style={{color: '#007bff', fontFamily: 'monospace'}}>{targetDevice || '无'}</strong>
           </div>
-          
-          <div className="sync-mode-selection">
-            <label style={{display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 'bold', color: '#333'}}>
-              同步模式:
-            </label>
-            <div className="sync-mode-options">
-              <label className="sync-mode-option">
-                <input
-                  type="radio"
-                  value="unidirectional"
-                  checked={syncMode === 'unidirectional'}
-                  onChange={(e) => setSyncMode(e.target.value)}
-                  disabled={syncStatus === 'syncing'}
-                />
-                <span className="sync-mode-label">
-                  单向同步
-                  <small>（仅将对方数据同步到本设备）</small>
-                </span>
-              </label>
-              <label className="sync-mode-option">
-                <input
-                  type="radio"
-                  value="bidirectional"
-                  checked={syncMode === 'bidirectional'}
-                  onChange={(e) => setSyncMode(e.target.value)}
-                  disabled={syncStatus === 'syncing'}
-                />
-                <span className="sync-mode-label">
-                  双向同步
-                  <small>（两台设备互相同步数据）</small>
-                </span>
-              </label>
-            </div>
-          </div>
         </div>
 
         <div className="sync-controls">
           {syncStatus === 'idle' && targetDevice && (
-            <button 
-              onClick={handleStartSync}
-              className="start-sync-btn"
-            >
-              开始{syncMode === 'bidirectional' ? '双向' : '单向'}同步
-            </button>
+            <div className="sync-buttons">
+              <button 
+                onClick={handleStartUnidirectionalSync}
+                className="sync-btn unidirectional-btn"
+              >
+                📥 单向同步
+                <small>（仅将对方数据同步到本设备）</small>
+              </button>
+              <button 
+                onClick={handleStartBidirectionalSync}
+                className="sync-btn bidirectional-btn"
+              >
+                🔄 双向同步
+                <small>（两台设备互相同步数据）</small>
+              </button>
+            </div>
           )}
           
           {syncStatus !== 'idle' && syncStatus !== 'syncing' && (
@@ -317,7 +322,7 @@ const SyncManager = ({ connectedDevices, onClose }) => {
               </div>
             )}
 
-            {syncMode === 'bidirectional' && syncStatus === 'syncing' && (
+            {syncProgress.syncId && syncStatus === 'syncing' && (
               <div className="bidirectional-info">
                 <h4>🔄 双向同步流程</h4>
                 <div className="phase-indicators">
@@ -336,7 +341,7 @@ const SyncManager = ({ connectedDevices, onClose }) => {
 
             {syncProgress.stats && (
               <div className="merge-summary">
-                <h4>📊 {syncMode === 'bidirectional' ? '双向同步' : '数据合并'}统计</h4>
+                <h4>📊 {syncProgress.syncId ? '双向同步' : '数据合并'}统计</h4>
                 <div className="merge-stats">
                   <div className="stat-item">
                     <span className="stat-label">新增图片:</span>

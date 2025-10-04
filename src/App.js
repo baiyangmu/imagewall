@@ -2,11 +2,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import './App.css';
 import ImageGrid from './ImageGrid';
-import UploadButton from './UploadButton';
-import DeviceSyncButton from './components/DeviceSyncButton';
 import P2PDemo from './components/P2PDemo';
-// import DownloadDBButton from './components/DownloadDBButton';
-// import DownloadImagesButton from './components/DownloadImagesButton';
 import useDeviceId from './hooks/useDeviceId';
 import DeviceService from './services/DeviceService';
 
@@ -29,23 +25,14 @@ function App() {
     return () => { mounted = false; };
   }, [deviceId]);
 
-  const handleUploadSuccess = () => {
-    if (imageGridRef.current) {
-      imageGridRef.current.reloadImages();
-    }
+  const handleSyncClick = () => {
+    setIsSyncOpen(true);
   };
 
   return (
     <div className="App">
-      {/* 上传按钮固定在右上角，z-index:500 */}
-      <div className="upload-button-wrapper">
-        <UploadButton onUploadSuccess={handleUploadSuccess} />
-        {/* <DownloadDBButton /> */}
-        {/* <DownloadImagesButton /> */}
-        <DeviceSyncButton onClick={() => setIsSyncOpen(true)} />
-      </div>
       {/* ImageGrid 包含模态框，z-index:1000 */}
-      <ImageGrid ref={imageGridRef} />
+      <ImageGrid ref={imageGridRef} onSyncClick={handleSyncClick} />
       <P2PDemo isModalMode={true} isOpen={isSyncOpen} onRequestClose={() => setIsSyncOpen(false)} />
     </div>
   );

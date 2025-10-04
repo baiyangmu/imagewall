@@ -6,6 +6,11 @@
   padding: 10px;
 }
 
+/* 为批量操作栏留出空间 */
+.image-grid-container.multi-select-active {
+  padding-bottom: 70px;
+}
+
 .my-masonry-grid {
   display: flex;
   margin-left: -10px; /* gutter size offset */
@@ -15,6 +20,11 @@
 .my-masonry-grid_column {
   padding-left: 10px; /* gutter size */
   background-clip: padding-box;
+}
+
+/* 确保网格在多选模式下的布局 */
+.image-grid-container.multi-select-active .my-masonry-grid {
+  padding-bottom: 10px;
 }
 
 /* Style your items */
@@ -38,6 +48,42 @@
   text-align: center;
   margin: 20px 0;
   color: #555;
+}
+
+/* Image loading placeholder */
+.image-loading-placeholder {
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: #f5f5f5;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed #ddd;
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #ddd;
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 /* 模态框覆盖层 */
@@ -175,6 +221,10 @@
 
 /* 响应式调整 */
 @media (max-width: 600px) {
+  .image-grid-container.multi-select-active {
+    padding-bottom: 90px;
+  }
+  
   .modal-content {
     width: 80vw;   /* 在小屏幕上占据80%视口宽度 */
     height: 80vh;  /* 在小屏幕上占据80%视口高度 */

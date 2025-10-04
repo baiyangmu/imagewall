@@ -10,9 +10,45 @@ import DeviceService from './DeviceService';
  * @returns {Promise<string>} 十六进制格式的哈希值
  */
 async function sha256Hex(arrayBuffer) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  // 检查是否支持Web Crypto API
+  if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      console.warn('[ImageService] Web Crypto API failed, falling back to simple hash:', e);
+    }
+  }
+  
+  // 降级处理：使用简单的哈希算法
+  return simpleHash(arrayBuffer);
+}
+
+
+/**
+ * 简单的哈希函数，用作Web Crypto API的降级替代
+ * @param {ArrayBuffer} arrayBuffer - 要计算哈希的数据
+ * @returns {string} 十六进制格式的哈希值
+ */
+function simpleHash(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let hash = 0;
+  let secondHash = 0;
+  
+  // 使用两个不同的哈希算法来减少冲突
+  for (let i = 0; i < bytes.length; i++) {
+    // 第一个哈希算法
+    hash = ((hash << 5) - hash + bytes[i]) & 0xffffffff;
+    // 第二个哈希算法
+    secondHash = ((secondHash << 3) + secondHash + bytes[i] * 17) & 0xffffffff;
+  }
+  
+  // 组合两个哈希值并转换为十六进制
+  const combined = (Math.abs(hash) + Math.abs(secondHash)).toString(16);
+  // 确保哈希长度足够，并添加文件大小作为额外的唯一性
+  const sizeHash = arrayBuffer.byteLength.toString(16);
+  return (combined + sizeHash).padStart(32, '0').slice(0, 32);
 }
 
 // ========== 所有图片相关操作都在images表上下文中执行 ==========

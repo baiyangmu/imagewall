@@ -1,16 +1,11 @@
 .sync-manager {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   background: white;
-  border: 1px solid #ddd;
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-  width: 600px;
-  max-height: 80vh;
-  z-index: 1001;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .sync-header {
@@ -49,8 +44,8 @@
 }
 
 .sync-body {
+  flex: 1;
   padding: 20px;
-  max-height: calc(80vh - 80px);
   overflow-y: auto;
 }
 
@@ -276,6 +271,68 @@
   gap: 10px;
 }
 
+/* 新增：双按钮布局样式 */
+.sync-buttons {
+  display: flex;
+  gap: 15px;
+  width: 100%;
+}
+
+.sync-btn {
+  flex: 1;
+  padding: 16px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  text-align: center;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.sync-btn small {
+  font-size: 11px;
+  font-weight: normal;
+  opacity: 0.8;
+  line-height: 1.3;
+  max-width: 160px;
+}
+
+.unidirectional-btn {
+  background: linear-gradient(135deg, #17a2b8, #138496);
+  color: white;
+  border: 2px solid transparent;
+}
+
+.unidirectional-btn:hover {
+  background: linear-gradient(135deg, #138496, #117a8b);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(23, 162, 184, 0.3);
+}
+
+.bidirectional-btn {
+  background: linear-gradient(135deg, #28a745, #20c997);
+  color: white;
+  border: 2px solid transparent;
+}
+
+.bidirectional-btn:hover {
+  background: linear-gradient(135deg, #20c997, #17a2b8);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+}
+
+.sync-btn:active {
+  transform: translateY(0);
+}
+
 .start-sync-btn {
   background: #28a745;
   color: white;
@@ -495,8 +552,8 @@
 /* 响应式设计 */
 @media (max-width: 768px) {
   .sync-manager {
-    width: 95vw;
-    max-height: 90vh;
+    width: 100%;
+    height: 100%;
   }
 
   .sync-body {
@@ -505,6 +562,16 @@
 
   .sync-controls {
     flex-direction: column;
+  }
+
+  .sync-buttons {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .sync-btn {
+    min-height: 70px;
+    padding: 14px 16px;
   }
 
   .start-sync-btn,

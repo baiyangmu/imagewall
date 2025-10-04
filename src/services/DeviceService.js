@@ -51,11 +51,24 @@ export function getOrCreateLocalDeviceId() {
  * @returns {Promise<string>} 6位数字代码 (000000-999999)
  */
 async function deviceCodeFromDeviceId(deviceId) {
-  const enc = new TextEncoder().encode(deviceId);
-  const hashBuf = await crypto.subtle.digest('SHA-256', enc);
-  const hex = Array.from(new Uint8Array(hashBuf))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+  let hex;
+  
+  // 检查是否支持Web Crypto API
+    if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+    try {
+      const enc = new TextEncoder().encode(deviceId);
+      const hashBuf = await crypto.subtle.digest('SHA-256', enc);
+      hex = Array.from(new Uint8Array(hashBuf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch (e) {
+      console.warn('[DeviceService] Web Crypto API failed, falling back to simple hash:', e);
+      hex = simpleStringHash(deviceId);
+    }
+  } else {
+    // 降级处理：使用简单的哈希算法
+    hex = simpleStringHash(deviceId);
+  }
   
   // 取最后8位16进制字符转换为数字，然后取模1000000得到6位数
   const slice = hex.slice(-8);
@@ -63,6 +76,29 @@ async function deviceCodeFromDeviceId(deviceId) {
   const code = (n % 1000000).toString().padStart(6, '0');
   
   return code;
+}
+
+
+/**
+ * 简单的字符串哈希函数，用作Web Crypto API的降级替代
+ * @param {string} str - 要计算哈希的字符串
+ * @returns {string} 十六进制格式的哈希值
+ */
+function simpleStringHash(str) {
+  let hash = 0;
+  let secondHash = 0;
+  
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    // 第一个哈希算法
+    hash = ((hash << 5) - hash + char) & 0xffffffff;
+    // 第二个哈希算法
+    secondHash = ((secondHash << 3) + secondHash + char * 17) & 0xffffffff;
+  }
+  
+  // 组合两个哈希值并转换为十六进制
+  const combined = (Math.abs(hash) + Math.abs(secondHash)).toString(16);
+  return combined.padStart(32, '0').slice(0, 32);
 }
 
 // ========== 所有设备相关操作都在devices表上下文中执行 ==========
@@ -103,7 +139,7 @@ export async function registerDevice(deviceId) {
     const code = await deviceCodeFromDeviceId(deviceId);
     const id = (await getMaxDeviceIdInternal(Module, handle)) + 1;
     const created_at = String(Math.floor(Date.now() / 1000));
-    const sql = `insert into devices ${id} ${deviceId} ${code} ${created_at}`;
+    const sql = `insert into devices ${id} ${deviceId} ${code} ${created_at} 1`;
     
     try {
       execSQL(Module, handle, sql);
@@ -453,6 +489,100 @@ function formatTimestamp(timestamp) {
   }
 }
 
+/**
+ * 记录连接过的设备
+ * 将设备代码添加到数据库中，避免重复添加
+ * @param {string} deviceCode - 6位设备代码
+ * @returns {Promise<boolean>} 是否成功记录
+ */
+export async function addConnectedDevice(deviceCode) {
+  if (!deviceCode || deviceCode.length !== 6) {
+    return false;
+  }
+  
+  return executeOnTableWithQueue('devices', async (Module, handle) => {
+    try {
+      // 查询所有设备，检查是否已存在该device_code
+      const { rc, text } = execSQL(Module, handle, `select * from devices`);
+      
+      if (rc === 0 && text) {
+        try {
+          const parsed = JSON.parse(text);
+          const rows = parsed.rows || [];
+          
+          // 检查是否已存在相同的device_code
+          const exists = rows.some(row => row.device_code === deviceCode);
+          if (exists) {
+            return true; // 已存在，无需重复添加
+          }
+        } catch (e) {
+          // 解析失败，继续添加流程
+        }
+      }
+      
+      // 为连接的设备生成一个device_id（基于device_code）
+      const deviceId = `connected-${deviceCode}-${Date.now()}`;
+      const id = (await getMaxDeviceIdInternal(Module, handle)) + 1;
+      const created_at = String(Math.floor(Date.now() / 1000));
+      
+      // 插入新的连接设备记录（is_current = 0，表示不是当前设备）
+      const sql = `insert into devices ${id} ${deviceId} ${deviceCode} ${created_at} 0`;
+      
+      execSQL(Module, handle, sql);
+      await persistFS(Module);
+      
+      return true;
+    } catch (e) {
+      console.error('addConnectedDevice error', e);
+      return false;
+    }
+  }, 'addConnectedDevice');
+}
+
+/**
+ * 获取所有连接过的设备代码列表
+ * 查询全量数据并去重，返回不重复的设备代码数组
+ * @returns {Promise<string[]>} 设备代码列表
+ */
+export async function getConnectedDeviceCodes() {
+  return executeOnTableWithQueue('devices', async (Module, handle) => {
+    try {
+      // 查询所有设备数据
+      const { rc, text } = execSQL(Module, handle, `select * from devices order by created_at desc`);
+      
+      if (rc !== 0 || !text) {
+        return [];
+      }
+      
+      try {
+        const parsed = JSON.parse(text);
+        const rows = parsed.rows || [];
+        
+        // 使用Set去重，获取所有不重复的device_code
+        const deviceCodes = new Set();
+        
+        rows.forEach(row => {
+          if (row.device_code && row.device_code.length === 6) {
+            // 排除当前设备（is_current = 1）
+            if (row.is_current !== 1) {
+              deviceCodes.add(row.device_code);
+            }
+          }
+        });
+        
+        // 转换为数组并返回
+        return Array.from(deviceCodes);
+      } catch (e) {
+        console.error('解析连接设备数据失败:', e);
+        return [];
+      }
+    } catch (e) {
+      console.error('获取连接设备代码失败:', e);
+      return [];
+    }
+  }, 'getConnectedDeviceCodes');
+}
+
 // ========== 服务对象导出 ==========
 
 const DeviceService = {
@@ -463,6 +593,8 @@ const DeviceService = {
   getHistoryDevices,
   getOnlineHistoryDevices,
   isDeviceOnline,
+  addConnectedDevice,
+  getConnectedDeviceCodes,
 };
 
 // 在浏览器控制台暴露服务用于测试和调试

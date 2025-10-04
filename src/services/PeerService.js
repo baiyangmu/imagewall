@@ -2,6 +2,7 @@ import { Peer } from 'peerjs';
 import { loadMyDBModule, ensurePersistentFS } from './MyDBService';
 import ImageService from './ImageService';
 import DatabaseMergeService from './DatabaseMergeService';
+import DeviceService from './DeviceService';
 
 class PeerService {
   constructor() {
@@ -16,13 +17,28 @@ class PeerService {
     this.transferQueue = [];
     this.isTransferring = false;
     this.currentTransfer = null;
-    this.chunkSize = 4096; // 4KB chunks to avoid stack overflow
+    this.chunkSize = 32768; // 32KB chunks - 安全且高效
     this.receivingFiles = new Map(); // fileKey -> {info, chunks, receivedChunks}
+    
+    // 接收确认机制 - 修复90%停滞问题
+    this.pendingReceives = new Map(); // fromDeviceCode -> { expectedFiles, completedFiles, syncId, isPhase2 }
+    this.isWaitingForProcessing = false;
+    
+    // 🔧 文件保存队列 - 降低并发度，避免冲突
+    this.fileSaveQueue = [];
+    this.isSavingFile = false;
+    this.saveRetryConfig = {
+      maxRetries: 3,
+      retryDelay: 1000, // 1秒
+      timeoutMs: 30000  // 30秒超时
+    };
     
     // 双向同步相关
     this.completedSyncStates = new Set(); // 避免循环依赖的状态管理
     this.activeSyncs = new Map(); // syncId -> syncInfo
     this.isBidirectionalMode = false; // 是否启用双向同步模式
+    this.isPhase2ReceiveMode = false; // 是否处于阶段2接收模式（应直接覆盖而不是合并）
+    this.currentPhase2SyncId = null; // 当前阶段2同步的ID
   }
 
   // 初始化PeerJS
@@ -47,14 +63,18 @@ class PeerService {
       // 局域网优化配置
       const config = {
         // 使用本地信令服务器
-        host: 'localhost',
+        host: '47.97.207.132',
         port: 9001,
         path: '/',
         secure: false, // 本地开发使用HTTP
-        debug: 1, // 减少调试信息
+        debug: 0, // 减少调试信息
         config: {
-          // 完全本地化的ICE配置 - 仅用于局域网直连
-          'iceServers': [],
+          // ICE配置 - 包含STUN服务器用于NAT穿透
+          'iceServers': [
+            {
+              urls: 'stun:47.97.207.132:3478'
+            }
+          ],
           // 允许所有类型的连接，但优先使用主机候选（局域网IP）
           'iceTransportPolicy': 'all',
           'iceCandidatePoolSize': 0,
@@ -109,9 +129,17 @@ class PeerService {
   handleIncomingConnection(conn) {
     console.log('收到来自设备的连接:', conn.peer);
     
-    conn.on('open', () => {
+    conn.on('open', async () => {
       console.log('与设备建立连接:', conn.peer);
       this.connections.set(conn.peer, conn);
+      
+      // 记录连接的设备代码
+      try {
+        await DeviceService.addConnectedDevice(conn.peer);
+        console.log('已记录连接设备:', conn.peer);
+      } catch (e) {
+        console.error('记录连接设备失败:', e);
+      }
       
       // 通知连接建立
       this.connectionHandlers.forEach(handler => {
@@ -169,9 +197,17 @@ class PeerService {
       const conn = this.peer.connect(targetDeviceCode);
       
       return new Promise((resolve, reject) => {
-        conn.on('open', () => {
+        conn.on('open', async () => {
           console.log('成功连接到设备:', targetDeviceCode);
           this.connections.set(targetDeviceCode, conn);
+          
+          // 记录连接的设备代码
+          try {
+            await DeviceService.addConnectedDevice(targetDeviceCode);
+            console.log('已记录连接设备:', targetDeviceCode);
+          } catch (e) {
+            console.error('记录连接设备失败:', e);
+          }
           
           // 设置消息处理 - 统一路由到 handleReceivedMessage
           conn.on('data', (data) => {
@@ -236,11 +272,11 @@ class PeerService {
       }
 
       // 对于文件块数据，限制日志输出以提高性能
-      if (message.type === 'file_chunk') {
-        console.log(`发送文件块 ${message.chunkIndex + 1}/${message.totalChunks} 到:`, targetDeviceCode);
-      } else {
-        console.log('消息发送:', message.type, '到:', targetDeviceCode);
-      }
+      // if (message.type === 'file_chunk') {
+      //   console.log(`发送文件块 ${message.chunkIndex + 1}/${message.totalChunks} 到:`, targetDeviceCode);
+      // } else {
+      //   console.log('消息发送:', message.type, '到:', targetDeviceCode);
+      // }
 
       conn.send(message);
     } catch (error) {
@@ -320,6 +356,17 @@ class PeerService {
     this.isInitialized = false;
     this.currentDeviceCode = null;
     
+    // 🔑 清理双向同步状态（修复数据覆盖问题）
+    this.isBidirectionalMode = false;
+    this.isPhase2ReceiveMode = false;
+    this.currentPhase2SyncId = null;
+    if (this.activeSyncs) {
+      this.activeSyncs.clear();
+    }
+    if (this.completedSyncStates) {
+      this.completedSyncStates.clear();
+    }
+    
     // 清理处理器
     if (this.connectionHandlers) {
       this.connectionHandlers.clear();
@@ -332,6 +379,23 @@ class PeerService {
     if (this.receivingFiles) {
       this.receivingFiles.clear();
     }
+    
+    // 🔑 清理接收确认状态（修复90%问题）
+    if (this.pendingReceives) {
+      this.pendingReceives.clear();
+    }
+    this.isWaitingForProcessing = false;
+    
+    // 🔧 清理文件保存队列状态
+    if (this.fileSaveQueue) {
+      // 清空队列并拒绝所有等待的任务
+      while (this.fileSaveQueue.length > 0) {
+        const queueItem = this.fileSaveQueue.shift();
+        queueItem.reject(new Error('PeerService已销毁'));
+      }
+    }
+    this.isSavingFile = false;
+    console.log('📂 文件保存队列已清理');
   }
 
   // 获取状态信息
@@ -413,6 +477,14 @@ class PeerService {
       // 清理同步状态
       this.activeSyncs.delete(syncId);
       this.isBidirectionalMode = false;
+      
+      // 🔑 清理阶段2接收状态（修复数据覆盖问题）
+      if (this.currentPhase2SyncId === syncId) {
+        this.isPhase2ReceiveMode = false;
+        this.currentPhase2SyncId = null;
+        console.log('🔄 [修复] 双向同步出错，清理阶段2接收状态');
+      }
+      
       throw error;
     }
   }
@@ -535,6 +607,13 @@ class PeerService {
     this.activeSyncs.delete(syncId);
     this.isBidirectionalMode = false;
     
+    // 🔑 清理阶段2接收状态（修复数据覆盖问题）
+    if (this.currentPhase2SyncId === syncId) {
+      this.isPhase2ReceiveMode = false;
+      this.currentPhase2SyncId = null;
+      console.log('🔄 [修复] 双向同步完成，清理阶段2接收状态');
+    }
+    
     // 清理相关的同步状态
     const statesToRemove = Array.from(this.completedSyncStates).filter(state => state.includes(syncId));
     statesToRemove.forEach(state => this.completedSyncStates.delete(state));
@@ -573,23 +652,15 @@ class PeerService {
       // 2. 然后发送所有图片
       await this.sendAllImages(fromDeviceCode);
       
-      // 3. 根据是否为阶段2发送相应的完成信号
-      if (isPhase2 && syncId) {
-        // 阶段2完成
-        this.sendMessage(fromDeviceCode, {
-          type: 'phase2_complete',
-          syncId: syncId,
-          timestamp: Date.now()
-        });
-        console.log('✅ 阶段2数据发送完成');
-      } else {
-        // 单向同步完成
-        this.sendMessage(fromDeviceCode, {
-          type: 'sync_complete',
-          timestamp: Date.now()
-        });
-        this.notifyProgress('sync_complete', { deviceCode: fromDeviceCode });
-      }
+      // 3. 发送传输完成信号（但不是最终完成）
+      this.sendMessage(fromDeviceCode, {
+        type: 'transfer_complete',
+        syncId: syncId,
+        isPhase2: isPhase2,
+        timestamp: Date.now()
+      });
+      
+      console.log('✅ 数据传输完成，等待接收方处理确认...');
       
     } catch (error) {
       console.error('处理同步请求失败:', error);
@@ -684,6 +755,11 @@ class PeerService {
         syncId: syncId,
         fromDevice: fromDeviceCode
       });
+      
+      // 🔑 设置阶段2接收模式，标记接下来接收的数据库应该直接覆盖而不是合并
+      this.isPhase2ReceiveMode = true;
+      this.currentPhase2SyncId = syncId;
+      console.log('🔄 [修复] 设置阶段2接收模式，将直接覆盖数据库');
       
       // 等待片刻确保对方准备就绪
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -986,7 +1062,12 @@ class PeerService {
   // 新增：分块发送文件
   async sendFileInChunks(targetDeviceCode, data, fileType, fileId = null) {
     const totalChunks = Math.ceil(data.length / this.chunkSize);
-    console.log(`开始发送${fileType}文件，总块数: ${totalChunks}`);
+    console.log(`📤 开始发送${fileType}文件:`, {
+      fileSize: `${(data.length / 1024).toFixed(1)}KB`,
+      chunkSize: `${(this.chunkSize / 1024).toFixed(1)}KB`,
+      totalChunks: totalChunks,
+      estimatedTime: `~${(totalChunks * 2 / 1000).toFixed(1)}秒` // 粗略估计
+    });
     
     for (let i = 0; i < totalChunks; i++) {
       try {
@@ -1015,13 +1096,10 @@ class PeerService {
         
         this.sendMessage(targetDeviceCode, message);
 
-        // 动态调整延迟，前面的块延迟短，后面的块延迟长
-        const delay = Math.min(50, 10 + (i * 2));
-        await new Promise(resolve => setTimeout(resolve, delay));
-        
-        // 每100块休息一下，避免阻塞UI
-        if (i > 0 && i % 100 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+        // 🚀 动态延迟策略 - 根据chunk大小和总块数调整（修复90%问题）
+        const delayConfig = this.calculateSendDelay(i, totalChunks, this.chunkSize);
+        if (delayConfig.shouldDelay) {
+          await new Promise(resolve => setTimeout(resolve, delayConfig.delay));
         }
       } catch (error) {
         console.error(`发送第${i + 1}块失败:`, error);
@@ -1046,12 +1124,15 @@ class PeerService {
   // 新增：处理接收到的消息（扩展原有方法）
   handleReceivedMessage(data, fromDeviceCode) {
     try {
-      console.log('📨 收到消息:', {
-        type: data.type,
-        fileType: data.fileType,
-        syncId: data.syncId,
-        from: fromDeviceCode
-      });
+      // 🔑 启用关键消息日志（修复90%问题调试）
+      if (data.type !== 'file_chunk') {
+        console.log('📨 收到消息:', {
+          type: data.type,
+          fileType: data.fileType,
+          syncId: data.syncId,
+          from: fromDeviceCode
+        });
+      }
       
       switch (data.type) {
         case 'sync_request':
@@ -1091,6 +1172,15 @@ class PeerService {
           });
           this.handleFileComplete(data, fromDeviceCode);
           break;
+        case 'transfer_complete':
+          this.handleTransferComplete(data, fromDeviceCode);
+          break;
+        case 'sync_receive_confirmed':
+          this.handleSyncReceiveConfirmed(data, fromDeviceCode);
+          break;
+        case 'phase2_receive_confirmed':
+          this.handlePhase2ReceiveConfirmed(data, fromDeviceCode);
+          break;
         case 'sync_complete':
           this.handleSyncComplete(data, fromDeviceCode);
           break;
@@ -1125,7 +1215,33 @@ class PeerService {
       fromDeviceCode: fromDeviceCode
     });
 
-    console.log(`✅ 开始接收${data.fileType}文件:`, data.fileName);
+    // 🔑 跟踪期望接收的文件（修复90%问题）
+    if (!this.pendingReceives.has(fromDeviceCode)) {
+      // 🔧 备用机制：如果没有收到transfer_complete，自动初始化接收状态
+      this.pendingReceives.set(fromDeviceCode, {
+        expectedFiles: 0,
+        completedFiles: 0,
+        syncId: null, // 可能稍后通过其他方式获取
+        isPhase2: this.isPhase2ReceiveMode // 根据当前模式判断
+      });
+      console.log('🔧 [备用] 自动初始化接收状态，当前模式:', {
+        isPhase2ReceiveMode: this.isPhase2ReceiveMode,
+        currentPhase2SyncId: this.currentPhase2SyncId
+      });
+    }
+    
+    const receiveStatus = this.pendingReceives.get(fromDeviceCode);
+    receiveStatus.expectedFiles++;
+    
+    // 🔧 如果是阶段2接收模式，更新syncId
+    if (this.isPhase2ReceiveMode && this.currentPhase2SyncId && !receiveStatus.syncId) {
+      receiveStatus.syncId = this.currentPhase2SyncId;
+      receiveStatus.isPhase2 = true;
+      console.log('🔧 [备用] 更新接收状态的syncId:', this.currentPhase2SyncId);
+    }
+    
+    console.log(`✅ 开始接收${data.fileType}文件:`, data.fileName, 
+                `期望文件总数: ${receiveStatus.expectedFiles}, 同步ID: ${receiveStatus.syncId}`);
     this.notifyProgress('receive_start', {
       fileType: data.fileType,
       fileName: data.fileName,
@@ -1159,15 +1275,28 @@ class PeerService {
       // 从Base64解码为Uint8Array
       const uint8Data = this.base64ToUint8Array(data.data);
       
-      // 存储块数据
+      // 🔑 防止重复计数（修复90%问题）
+      const wasAlreadyReceived = fileInfo.chunks[data.chunkIndex] !== undefined;
       fileInfo.chunks[data.chunkIndex] = uint8Data;
-      fileInfo.receivedChunks++;
+      
+      if (!wasAlreadyReceived) {
+        fileInfo.receivedChunks++;
+      } else {
+        console.log(`⚠️ 重复接收chunk ${data.chunkIndex}，跳过计数`);
+      }
 
       // 更新进度
       const progress = (fileInfo.receivedChunks / fileInfo.info.totalChunks) * 100;
       
-      // 限制进度通知频率，提高性能
-      if (data.chunkIndex % 10 === 0 || fileInfo.receivedChunks === fileInfo.info.totalChunks) {
+      // 🔑 修复进度通知条件（解决90%停滞问题）
+      // 对于小文件（<10块），总是通知最后几块的进度
+      const shouldNotify = (
+        data.chunkIndex % 10 === 0 || // 每10块通知一次
+        fileInfo.receivedChunks === fileInfo.info.totalChunks || // 最后一块
+        (fileInfo.info.totalChunks <= 10 && data.chunkIndex >= fileInfo.info.totalChunks - 3) // 小文件的最后3块
+      );
+      
+      if (shouldNotify) {
         this.notifyProgress('receive_progress', {
           fileType: data.fileType,
           progress: progress,
@@ -1199,62 +1328,185 @@ class PeerService {
       return;
     }
 
+    // 🔑 分离文件传输完成和文件保存 - 修复保存失败导致的卡住问题
+    let fileTransferComplete = false;
+    let completeFile = null;
+    
     try {
-      // 合并所有块
+      // 步骤1：验证文件传输完整性
+      const missingChunks = [];
+      for (let i = 0; i < fileInfo.info.totalChunks; i++) {
+        if (!fileInfo.chunks[i]) {
+          missingChunks.push(i);
+        }
+      }
+      
+      if (missingChunks.length > 0) {
+        console.error(`❌ 文件${data.fileType}传输不完整，缺失chunks:`, missingChunks);
+        console.error('接收状态:', {
+          expectedChunks: fileInfo.info.totalChunks,
+          receivedChunks: fileInfo.receivedChunks,
+          actualChunks: fileInfo.chunks.filter(c => c !== undefined).length
+        });
+        throw new Error(`文件传输不完整，缺失${missingChunks.length}个块`);
+      }
+      
+      // 步骤2：合并文件块
       const totalSize = fileInfo.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      const completeFile = new Uint8Array(totalSize);
+      completeFile = new Uint8Array(totalSize);
       let offset = 0;
       
       for (const chunk of fileInfo.chunks) {
-        completeFile.set(chunk, offset);
-        offset += chunk.length;
+        if (chunk) {
+          completeFile.set(chunk, offset);
+          offset += chunk.length;
+        }
       }
 
-      console.log('文件合并完成:', {
+      console.log('✅ 文件传输和合并完成:', {
         fileType: data.fileType,
         totalSize,
-        fileInfoData: fileInfo.info
-      });
-
-      // 根据文件类型处理
-      console.log('🔍 文件类型判断:', {
-        fileType: data.fileType,
-        isDatabase: data.fileType === 'database',
-        isImage: data.fileType === 'image'
-      });
-      
-      if (data.fileType === 'database') {
-        console.log('📦 处理数据库文件...');
-        await this.saveDatabaseFile(completeFile);
-      } else if (data.fileType === 'image') {
-        console.log('🖼️ 准备保存图片，fileInfo.info:', fileInfo.info);
-        console.log('🖼️ 图片数据大小:', completeFile.length);
-        await this.saveImageFile(fileInfo.info, completeFile);
-      } else {
-        console.warn('⚠️ 未知文件类型:', data.fileType);
-      }
-
-      // 清理接收状态
-      this.receivingFiles.delete(fileKey);
-      
-      console.log(`${data.fileType}文件接收完成:`, fileInfo.info.fileName);
-      this.notifyProgress('receive_complete', {
-        fileType: data.fileType,
         fileName: fileInfo.info.fileName
       });
+      
+      // 🔑 标记传输完成 - 无论后续保存是否成功，传输都已完成
+      fileTransferComplete = true;
+      
     } catch (error) {
-      console.error('处理完成文件失败:', error);
+      console.error('❌ 文件传输或合并失败:', error);
+      console.error('传输状态:', {
+        fileType: data.fileType,
+        fileId: data.fileId,
+        expectedChunks: fileInfo ? fileInfo.info.totalChunks : 'unknown',
+        receivedChunks: fileInfo ? fileInfo.receivedChunks : 'unknown'
+      });
+      
+      // 传输失败时不更新接收进度
+      return;
+    }
+    
+    // 步骤3：尝试保存文件（即使失败也不影响传输完成状态）
+    let saveSuccess = false;
+    try {
+      // 🔧 使用文件保存队列，降低并发度
+      if (data.fileType === 'database') {
+        console.log('📦 将数据库保存任务加入队列...');
+        await this.queueFileSave(async () => {
+          console.log('📦 队列：开始保存数据库文件...');
+          await this.saveDatabaseFile(completeFile);
+          console.log('✅ 队列：数据库文件保存成功');
+        });
+        saveSuccess = true;
+      } else if (data.fileType === 'image') {
+        console.log('🖼️ 将图片保存任务加入队列...');
+        await this.queueFileSave(async () => {
+          console.log('🖼️ 队列：开始保存图片文件...');
+          await this.saveImageFile(fileInfo.info, completeFile);
+          console.log('✅ 队列：图片文件保存成功');
+        });
+        saveSuccess = true;
+      } else {
+        console.warn('⚠️ 未知文件类型:', data.fileType);
+        saveSuccess = false;
+      }
+    } catch (saveError) {
+      console.error('❌ 文件保存失败:', saveError);
+      console.error('保存失败的文件:', {
+        fileType: data.fileType,
+        fileName: fileInfo.info.fileName,
+        fileSize: completeFile.length
+      });
+      saveSuccess = false;
+      
+      // 通知保存错误
+      this.notifyProgress('save_error', {
+        fileType: data.fileType,
+        fileName: fileInfo.info.fileName,
+        error: saveError.message
+      });
+    }
+    
+    // 步骤4：清理和完成通知
+    this.receivingFiles.delete(fileKey);
+    
+    console.log(`📁 文件处理完成:`, {
+      fileName: fileInfo.info.fileName,
+      transferComplete: fileTransferComplete,
+      saveSuccess: saveSuccess
+    });
+    
+    this.notifyProgress('receive_complete', {
+      fileType: data.fileType,
+      fileName: fileInfo.info.fileName,
+      saveSuccess: saveSuccess
+    });
+
+    // 🔑 关键修复：只要传输完成就更新接收进度，不管保存是否成功
+    if (fileTransferComplete) {
+      console.log('✅ 文件传输完成，更新接收进度...', {
+        fileType: data.fileType,
+        fileName: fileInfo.info.fileName,
+        fromDevice: fromDeviceCode
+      });
+      await this.updateReceiveProgress(fromDeviceCode, data.fileType);
+    } else {
+      console.warn('⚠️ 文件传输未完成，跳过接收进度更新');
+    }
+  }
+
+  // 🔑 新增：更新接收进度并检查是否完成（修复90%问题）
+  async updateReceiveProgress(fromDeviceCode, fileType) {
+    console.log('🔧 [调试] updateReceiveProgress 被调用:', { fromDeviceCode, fileType });
+    
+    const receiveStatus = this.pendingReceives.get(fromDeviceCode);
+    if (!receiveStatus) {
+      console.log('⚠️ [调试] 没有找到接收状态，可能没有正确初始化');
+      return;
+    }
+    
+    receiveStatus.completedFiles++;
+    console.log(`📊 文件处理完成进度: ${receiveStatus.completedFiles}/${receiveStatus.expectedFiles} (${fileType})`);
+    console.log('📋 [调试] 当前接收状态:', receiveStatus);
+    
+    // 检查是否所有文件都处理完成
+    if (receiveStatus.completedFiles >= receiveStatus.expectedFiles) {
+      console.log('🎉 所有文件处理完成，发送最终确认信号...');
+      
+      // 发送最终确认信号
+      if (receiveStatus.isPhase2 && receiveStatus.syncId) {
+        console.log('📤 [调试] 发送阶段2接收确认信号...');
+        // 阶段2完成确认
+        this.sendMessage(fromDeviceCode, {
+          type: 'phase2_receive_confirmed',
+          syncId: receiveStatus.syncId,
+          timestamp: Date.now()
+        });
+      } else {
+        console.log('📤 [调试] 发送普通同步接收确认信号...');
+        // 普通同步完成确认
+        this.sendMessage(fromDeviceCode, {
+          type: 'sync_receive_confirmed',
+          syncId: receiveStatus.syncId,
+          timestamp: Date.now()
+        });
+      }
+      
+      // 清理接收状态
+      this.pendingReceives.delete(fromDeviceCode);
+      console.log('🧹 [调试] 接收状态已清理');
     }
   }
 
   // 改进：保存数据库文件（支持数据合并）
   async saveDatabaseFile(data) {
     try {
-      console.log('🗄️ 开始保存数据库文件...', {
-        dataSize: data.length,
-        isEmpty: data.length === 0
-      });
-      this.notifyProgress('db_save_start', { message: '正在保存数据库文件' });
+              console.log('🗄️ 开始保存数据库文件...', {
+          dataSize: data.length,
+          isEmpty: data.length === 0,
+          isPhase2ReceiveMode: this.isPhase2ReceiveMode,
+          currentPhase2SyncId: this.currentPhase2SyncId
+        });
+        this.notifyProgress('db_save_start', { message: '正在保存数据库文件' });
       
       const Module = await loadMyDBModule();
       await ensurePersistentFS(Module);
@@ -1283,7 +1535,37 @@ class PeerService {
           return;
         }
         
-        // 🔑 使用数据库合并策略
+        // 🔑 检查是否为阶段2接收模式（双向同步的第二阶段）
+        if (this.isPhase2ReceiveMode && this.currentPhase2SyncId) {
+          console.log('🔄 [修复] 阶段2接收模式：直接覆盖数据库，不进行合并');
+          console.log('📋 阶段2接收详情:', {
+            syncId: this.currentPhase2SyncId,
+            dataSize: data.length,
+            strategy: 'direct_overwrite'
+          });
+          
+          this.notifyProgress('db_phase2_overwrite_start', { 
+            message: '阶段2：正在接收对方的合并结果...',
+            syncId: this.currentPhase2SyncId
+          });
+          
+          // 直接覆盖策略（用于阶段2）
+          await this.directOverwriteDatabase(Module, dbPath, data);
+          
+          this.notifyProgress('db_phase2_overwrite_complete', { 
+            message: '阶段2：对方合并结果已应用',
+            strategy: 'phase2_overwrite',
+            syncId: this.currentPhase2SyncId
+          });
+          
+          // 清理阶段2接收状态
+          this.isPhase2ReceiveMode = false;
+          this.currentPhase2SyncId = null;
+          console.log('🔄 [修复] 阶段2接收模式已清理');
+          return;
+        }
+        
+        // 🔑 使用数据库合并策略（单向同步或双向同步阶段1）
         console.log('🔄 开始数据库合并流程...');
         this.notifyProgress('db_merge_start', { 
           message: '正在合并数据库，保留所有数据' 
@@ -1322,8 +1604,7 @@ class PeerService {
       
       // 🔑 关键修复：持久化数据库文件到 IndexedDB
       console.log('🔄 开始持久化数据库文件到 IndexedDB...');
-      const { persistFS } = await import('./MyDBService');
-      await persistFS(Module);
+      await this.persistWithRetry(Module, '数据库文件持久化');
       console.log('💾 数据库文件已持久化到 IndexedDB');
       
       console.log('✅ 数据库文件创建完成');
@@ -1373,14 +1654,126 @@ class PeerService {
     Module.FS.writeFile(dbPath, data);
     
     // 持久化
-    const { persistFS } = await import('./MyDBService');
-    await persistFS(Module);
+    await this.persistWithRetry(Module, '回退策略持久化');
     
     console.log('✅ 覆盖策略执行完成');
     this.notifyProgress('db_overwrite_complete', { 
       message: '数据库文件已覆盖（回退策略）',
       fileSize: data.length
     });
+  }
+
+  // 新增：直接覆盖数据库（用于双向同步阶段2）
+  async directOverwriteDatabase(Module, dbPath, data) {
+    console.log('🔄 [修复] 执行阶段2直接覆盖策略...');
+    
+    try {
+      // 先备份现有数据库（以防万一）
+      const backupPath = `/persistent/phase2_backup_${Date.now()}.db`;
+      try {
+        const existingData = Module.FS.readFile(dbPath);
+        Module.FS.writeFile(backupPath, existingData);
+        console.log('💾 [修复] 阶段2备份已创建:', backupPath);
+      } catch (e) {
+        console.warn('[修复] 创建阶段2备份失败:', e);
+      }
+      
+      // 删除现有数据库
+      try {
+        Module.FS.unlink(dbPath);
+        console.log('🗑️ [修复] 现有数据库文件已删除');
+      } catch (error) {
+        console.warn('⚠️ [修复] 删除现有数据库失败，尝试直接覆盖:', error);
+      }
+      
+      // 写入对方的合并结果
+      Module.FS.writeFile(dbPath, data);
+      
+      // 持久化到IndexedDB
+      await this.persistWithRetry(Module, '阶段2直接覆盖持久化');
+      
+      console.log('✅ [修复] 阶段2直接覆盖完成');
+      
+      // 🔧 安全网：在阶段2数据库处理完成后，检查是否需要发送确认
+      if (this.isPhase2ReceiveMode && this.currentPhase2SyncId) {
+        console.log('🛡️ [安全网] 阶段2数据库处理完成，检查是否需要发送确认...');
+        
+        // 等待其他文件处理完成
+        setTimeout(async () => {
+          await this.checkAndSendPhase2Confirmation();
+        }, 2000);
+      }
+      
+    } catch (error) {
+      console.error('❌ [修复] 阶段2直接覆盖失败:', error);
+      throw error;
+    }
+  }
+
+  // 🔧 安全网：检查并发送阶段2确认（修复90%问题）
+  async checkAndSendPhase2Confirmation() {
+    if (!this.isPhase2ReceiveMode || !this.currentPhase2SyncId) {
+      return;
+    }
+    
+    console.log('🛡️ [安全网] 检查阶段2确认状态...');
+    
+    // 查找对应的接收状态
+    let targetDeviceCode = null;
+    let receiveStatus = null;
+    
+    for (const [deviceCode, status] of this.pendingReceives.entries()) {
+      if (status.syncId === this.currentPhase2SyncId) {
+        targetDeviceCode = deviceCode;
+        receiveStatus = status;
+        break;
+      }
+    }
+    
+    if (targetDeviceCode && receiveStatus) {
+      console.log('🛡️ [安全网] 找到接收状态:', {
+        targetDeviceCode,
+        completedFiles: receiveStatus.completedFiles,
+        expectedFiles: receiveStatus.expectedFiles
+      });
+      
+      // 如果所有文件都已处理完成，发送确认
+      if (receiveStatus.completedFiles >= receiveStatus.expectedFiles) {
+        console.log('🛡️ [安全网] 触发阶段2确认信号...');
+        
+        this.sendMessage(targetDeviceCode, {
+          type: 'phase2_receive_confirmed',
+          syncId: this.currentPhase2SyncId,
+          timestamp: Date.now()
+        });
+        
+        // 清理状态
+        this.pendingReceives.delete(targetDeviceCode);
+        this.isPhase2ReceiveMode = false;
+        this.currentPhase2SyncId = null;
+        
+        console.log('🛡️ [安全网] 阶段2确认已发送，状态已清理');
+      }
+    } else {
+      console.log('🛡️ [安全网] 没有找到对应的接收状态，可能已经处理完成');
+      
+      // 如果没有找到接收状态，可能是因为没有文件需要接收，直接发送确认
+      // 这里需要找到发起设备的代码
+      const activeSync = Array.from(this.activeSyncs.values()).find(sync => sync.syncId === this.currentPhase2SyncId);
+      if (activeSync) {
+        console.log('🛡️ [安全网] 直接发送阶段2确认给发起设备:', activeSync.initiator);
+        
+        this.sendMessage(activeSync.initiator, {
+          type: 'phase2_receive_confirmed',
+          syncId: this.currentPhase2SyncId,
+          timestamp: Date.now()
+        });
+        
+        // 清理状态
+        this.isPhase2ReceiveMode = false;
+        this.currentPhase2SyncId = null;
+      }
+    }
   }
 
 
@@ -1428,8 +1821,7 @@ class PeerService {
       
       // 🔑 关键修复：持久化图片文件到 IndexedDB
       console.log('🔄 开始持久化图片文件到 IndexedDB...');
-      const { persistFS } = await import('./MyDBService');
-      await persistFS(Module);
+      await this.persistWithRetry(Module, '图片文件持久化');
       console.log('💾 图片文件已持久化到 IndexedDB');
       
       console.log('✅ 图片文件保存成功:', fileName);
@@ -1449,6 +1841,71 @@ class PeerService {
     }
   }
 
+  // 🔑 新增：处理传输完成信号（修复90%问题）
+  handleTransferComplete(data, fromDeviceCode) {
+    const { syncId, isPhase2 } = data;
+    console.log('📦 收到传输完成信号，开始初始化接收状态...', {
+      fromDeviceCode,
+      syncId,
+      isPhase2
+    });
+    
+    // 初始化或更新接收状态
+    if (this.pendingReceives.has(fromDeviceCode)) {
+      const receiveStatus = this.pendingReceives.get(fromDeviceCode);
+      receiveStatus.syncId = syncId;
+      receiveStatus.isPhase2 = isPhase2 || false;
+      console.log(`📊 接收状态已更新: 期望${receiveStatus.expectedFiles}个文件`);
+    } else {
+      // 如果没有文件需要接收，立即发送确认
+      console.log('🎯 没有文件需要接收，立即发送确认');
+      if (isPhase2 && syncId) {
+        this.sendMessage(fromDeviceCode, {
+          type: 'phase2_receive_confirmed',
+          syncId: syncId,
+          timestamp: Date.now()
+        });
+      } else {
+        this.sendMessage(fromDeviceCode, {
+          type: 'sync_receive_confirmed',
+          syncId: syncId,
+          timestamp: Date.now()
+        });
+      }
+    }
+  }
+
+  // 🔑 新增：处理同步接收确认（修复90%问题）
+  handleSyncReceiveConfirmed(data, fromDeviceCode) {
+    const { syncId } = data;
+    console.log('✅ 收到同步接收确认:', {
+      fromDeviceCode,
+      syncId
+    });
+    
+    this.notifyProgress('sync_complete', {
+      deviceCode: fromDeviceCode,
+      syncId: syncId,
+      timestamp: data.timestamp
+    });
+  }
+
+  // 🔑 新增：处理阶段2接收确认（修复90%问题）
+  handlePhase2ReceiveConfirmed(data, fromDeviceCode) {
+    const { syncId } = data;
+    console.log('✅ 收到阶段2接收确认:', {
+      fromDeviceCode,
+      syncId
+    });
+    
+    // 发送阶段2完成信号给双向同步流程
+    this.sendMessage(fromDeviceCode, {
+      type: 'phase2_complete',
+      syncId: syncId,
+      timestamp: Date.now()
+    });
+  }
+
   // 新增：处理同步完成
   handleSyncComplete(data, fromDeviceCode) {
     console.log('同步完成，来自:', fromDeviceCode);
@@ -1460,10 +1917,22 @@ class PeerService {
 
   // 新增：处理同步错误
   handleSyncError(data, fromDeviceCode) {
-    console.error('同步错误，来自:', fromDeviceCode, data.error);
+    //console.error('同步错误，来自:', fromDeviceCode, data.error);
+    
+    // 🔑 如果是双向同步错误，清理相关状态（修复数据覆盖问题）
+    if (data.syncId) {
+      this.activeSyncs.delete(data.syncId);
+      if (this.currentPhase2SyncId === data.syncId) {
+        this.isPhase2ReceiveMode = false;
+        this.currentPhase2SyncId = null;
+        //console.log('🔄 [修复] 同步错误，清理阶段2接收状态');
+      }
+    }
+    
     this.notifyProgress('sync_error', {
       deviceCode: fromDeviceCode,
-      error: data.error
+      error: data.error,
+      syncId: data.syncId
     });
   }
 
@@ -1552,6 +2021,195 @@ class PeerService {
       uint8Array[i] = binary.charCodeAt(i);
     }
     return uint8Array;
+  }
+
+  // 🚀 动态延迟计算（修复90%问题）
+  calculateSendDelay(chunkIndex, totalChunks, chunkSize) {
+    // 根据chunk大小和总数动态调整延迟策略
+    if (chunkSize <= 1024) {
+      // 1KB及以下：高频率小消息，需要更多延迟
+      return {
+        shouldDelay: chunkIndex % 5 === 0 && chunkIndex > 0,
+        delay: 5 // 每5块延迟5ms
+      };
+    } else if (chunkSize <= 4096) {
+      // 4KB：平衡策略，目前工作良好
+      return {
+        shouldDelay: chunkIndex % 10 === 0 && chunkIndex > 0,
+        delay: 2 // 每10块延迟2ms
+      };
+    } else if (chunkSize <= 16384) {
+      // 16KB：中等块大小
+      return {
+        shouldDelay: chunkIndex % 15 === 0 && chunkIndex > 0,
+        delay: 3 // 每15块延迟3ms
+      };
+    } else {
+      // 32KB及以上：大块，较少延迟
+      return {
+        shouldDelay: chunkIndex % 25 === 0 && chunkIndex > 0,
+        delay: 1 // 每25块延迟1ms
+      };
+    }
+  }
+
+  // 🔧 文件保存队列管理 - 降低并发度，避免冲突
+  async queueFileSave(saveTask) {
+    return new Promise((resolve, reject) => {
+      const queueItem = {
+        task: saveTask,
+        resolve,
+        reject,
+        timestamp: Date.now()
+      };
+      
+      this.fileSaveQueue.push(queueItem);
+      console.log(`📋 文件保存任务已入队，队列长度: ${this.fileSaveQueue.length}`);
+      
+      // 启动队列处理
+      this.processSaveQueue();
+    });
+  }
+  
+  async processSaveQueue() {
+    if (this.isSavingFile || this.fileSaveQueue.length === 0) {
+      return;
+    }
+    
+    this.isSavingFile = true;
+    console.log(`🔄 开始处理文件保存队列，剩余任务: ${this.fileSaveQueue.length}`);
+    
+    while (this.fileSaveQueue.length > 0) {
+      const queueItem = this.fileSaveQueue.shift();
+      
+      try {
+        console.log(`💾 开始保存文件任务 (队列剩余: ${this.fileSaveQueue.length})`);
+        const result = await this.executeFileSaveWithRetry(queueItem.task);
+        queueItem.resolve(result);
+        console.log(`✅ 文件保存任务完成`);
+      } catch (error) {
+        console.error(`❌ 文件保存任务失败:`, error);
+        queueItem.reject(error);
+      }
+      
+      // 任务间添加小延迟，避免过度并发
+      if (this.fileSaveQueue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    
+    this.isSavingFile = false;
+    console.log(`🎉 文件保存队列处理完成`);
+  }
+  
+  async executeFileSaveWithRetry(saveTask) {
+    const { maxRetries, retryDelay, timeoutMs } = this.saveRetryConfig;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 文件保存尝试 ${attempt}/${maxRetries}`);
+        
+        // 添加超时机制
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('文件保存超时')), timeoutMs);
+        });
+        
+        const result = await Promise.race([
+          saveTask(),
+          timeoutPromise
+        ]);
+        
+        console.log(`✅ 文件保存成功 (尝试 ${attempt}/${maxRetries})`);
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ 文件保存失败 (尝试 ${attempt}/${maxRetries}):`, error.message);
+        
+        if (attempt < maxRetries) {
+          const delay = retryDelay * attempt; // 递增延迟
+          console.log(`⏳ ${delay}ms 后重试...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    console.error(`💥 文件保存最终失败，已尝试 ${maxRetries} 次`);
+    throw lastError;
+  }
+
+  // 🔧 持久化重试机制 - 专门处理persistFS的竞态条件
+  async persistWithRetry(Module, operation = 'persistFS') {
+    const maxRetries = 5;
+    const baseDelay = 500;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`💾 ${operation} 尝试 ${attempt}/${maxRetries}`);
+        
+        const { persistFS } = await import('./MyDBService');
+        await persistFS(Module);
+        
+        console.log(`✅ ${operation} 成功 (尝试 ${attempt}/${maxRetries})`);
+        return;
+        
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ ${operation} 失败 (尝试 ${attempt}/${maxRetries}):`, error.message);
+        
+        if (attempt < maxRetries) {
+          // 指数退避延迟
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          console.log(`⏳ ${delay}ms 后重试 ${operation}...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    console.error(`💥 ${operation} 最终失败，已尝试 ${maxRetries} 次`);
+    throw new Error(`${operation} 失败: ${lastError.message}`);
+  }
+
+  // 🧪 测试方法：验证文件保存队列和重试机制
+  async testFileSaveQueue() {
+    console.log('🧪 开始测试文件保存队列机制...');
+    
+    const testTasks = [
+      () => new Promise(resolve => {
+        console.log('📝 测试任务1开始');
+        setTimeout(() => {
+          console.log('✅ 测试任务1完成');
+          resolve('任务1结果');
+        }, 1000);
+      }),
+      () => new Promise(resolve => {
+        console.log('📝 测试任务2开始');
+        setTimeout(() => {
+          console.log('✅ 测试任务2完成');
+          resolve('任务2结果');
+        }, 500);
+      }),
+      () => new Promise((resolve, reject) => {
+        console.log('📝 测试任务3开始（会失败一次）');
+        if (Math.random() > 0.5) {
+          reject(new Error('模拟失败'));
+        } else {
+          setTimeout(() => {
+            console.log('✅ 测试任务3完成');
+            resolve('任务3结果');
+          }, 800);
+        }
+      })
+    ];
+    
+    const results = await Promise.all(
+      testTasks.map(task => this.queueFileSave(task))
+    );
+    
+    console.log('🎉 测试完成，结果:', results);
+    return results;
   }
 
 }

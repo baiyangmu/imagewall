@@ -16,11 +16,9 @@ class DatabaseMergeService {
     console.log('🔄 开始数据库合并流程...');
     
     return executeWithQueue(async () => {
-      const { Module, handle } = await loadMyDBModule().then(async (Module) => {
-        await ensurePersistentFS(Module);
-        // 注意：这里我们需要操作多个数据库，所以暂时不打开特定数据库
-        return { Module, handle: null };
-      });
+      const Module = await loadMyDBModule();
+      await ensurePersistentFS(Module);
+      // 注意：这里我们需要操作多个数据库，所以暂时不打开特定数据库
       
       const timestamp = Date.now();
       const mainDbPath = '/persistent/imageWall.db';

@@ -1,0 +1,143 @@
+.action-menu-grid-item {
+  position: relative;
+  width: 100%;
+  height: 200px; /* 给一个合适的高度，和图片项目类似 */
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-menu-trigger {
+  width: 80%;
+  height: 120px;
+  background-color: #e8f0fe;
+  border: 2px solid #4285f4;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: bold;
+  color: #4285f4;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.action-menu-trigger:hover {
+  background-color: #d2e3fc;
+  transform: scale(1.05);
+}
+
+.action-menu-trigger:active {
+  transform: scale(0.95);
+}
+
+.action-menu-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.action-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  z-index: 999;
+}
+
+.action-menu-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  min-width: 200px;
+  z-index: 1001;
+  animation: menuSlideIn 0.2s ease-out;
+}
+
+@keyframes menuSlideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.action-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  font-weight: 500;
+  outline: none;
+}
+
+.action-menu-item:last-child {
+  margin-bottom: 0;
+}
+
+.action-menu-item:hover {
+  background: #e9ecef;
+  border-color: #4285f4;
+}
+
+.action-menu-item:active {
+  transform: scale(0.98);
+}
+
+.action-menu-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.upload-btn {
+  color: #4285f4;
+}
+
+.sync-btn {
+  color: #34a853;
+}
+
+.action-menu-item-desc {
+  font-size: 12px;
+  color: #6c757d;
+  font-weight: normal;
+  margin-top: 2px;
+}
+
+.action-menu-error {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border: 1px solid #dc3545;
+  border-radius: 8px;
+  padding: 12px;
+  color: #dc3545;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-width: 300px;
+  z-index: 1001;
+} 

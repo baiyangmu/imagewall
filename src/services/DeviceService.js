@@ -280,7 +280,7 @@ export async function registerCurrentDevice(deviceId) {
     const code = await deviceCodeFromDeviceId(deviceId);
     const id = (await getMaxDeviceIdInternal(Module, handle)) + 1;
     const created_at = String(Math.floor(Date.now() / 1000));
-    const sql = `insert into devices ${id} ${deviceId} ${code} ${created_at}`;
+    const sql = `insert into devices ${id} ${deviceId} ${code} ${created_at} 1`;
     
     try {
       execSQL(Module, handle, sql);

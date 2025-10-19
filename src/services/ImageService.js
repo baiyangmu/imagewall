@@ -408,25 +408,47 @@ export async function deleteImage(imageId) {
  * @returns {Promise<number>} 最大ID值，如果表为空则返回0
  */
 async function getMaxImageIdInternal(Module, handle) {
+  console.log('[getMaxImageIdInternal] 开始获取最大ID');
   const { rc, text } = execSQL(Module, handle, 'select id from images order by id desc limit 1 offset 0');
   
-  if (rc !== 0 || !text) {
+  console.log('[getMaxImageIdInternal] SQL执行结果:', { rc, text });
+  
+  if (rc !== 0) {
+    console.warn('[getMaxImageIdInternal] SQL执行失败, rc:', rc);
+    return 0;
+  }
+  
+  if (!text) {
+    console.warn('[getMaxImageIdInternal] 返回结果为空');
     return 0;
   }
   
   try {
     const parsed = JSON.parse(text);
+    console.log('[getMaxImageIdInternal] JSON解析成功:', parsed);
     const rows = parsed.rows || [];
+    console.log('[getMaxImageIdInternal] rows数量:', rows.length);
     
     if (!rows.length) {
+      console.log('[getMaxImageIdInternal] 表为空，返回0');
       return 0;
     }
     
     const v = rows[0].id;
+    console.log('[getMaxImageIdInternal] 第一行的id值:', v);
     const n = parseInt(v, 10);
+    console.log('[getMaxImageIdInternal] 解析后的数字:', n);
     
-    return Number.isNaN(n) ? 0 : n;
+    if (Number.isNaN(n)) {
+      console.warn('[getMaxImageIdInternal] ID解析为NaN，返回0');
+      return 0;
+    }
+    
+    console.log('[getMaxImageIdInternal] 返回最大ID:', n);
+    return n;
   } catch (e) {
+    console.error('[getMaxImageIdInternal] JSON解析或处理失败:', e);
+    console.error('[getMaxImageIdInternal] 原始text:', text);
     return 0;
   }
 }

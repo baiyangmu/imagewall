@@ -4253,9 +4253,9 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
 // end include: postlibrary.js
 
 var ASM_CONSTS = {
-  5032: () => { try { FS.mkdir('/persistent'); } catch(e) {} try { FS.mount(IDBFS, {}, '/persistent'); } catch(e) {} },  
- 5137: () => { FS.syncfs(true, function(err) { if (err) { console.log('FS.syncfs(true) error', err); } }); },  
- 5233: () => { try { FS.syncfs(false, function(err) { if (err) { console.log('FS.syncfs(false) error', err); } else { console.log('FS.syncfs(false) complete'); } }); } catch (e) { console.log('ems_sync_to_idb EM_ASM failed', e); } }
+  8856: () => { try { FS.mkdir('/persistent'); } catch(e) {} try { FS.mount(IDBFS, {}, '/persistent'); } catch(e) {} },  
+ 8961: () => { FS.syncfs(true, function(err) { if (err) { console.log('FS.syncfs(true) error', err); } }); },  
+ 9057: () => { try { FS.syncfs(false, function(err) { if (err) { console.log('FS.syncfs(false) error', err); } else { console.log('FS.syncfs(false) complete'); } }); } catch (e) { console.log('ems_sync_to_idb EM_ASM failed', e); } }
 };
 
 // Imports from the Wasm binary.
